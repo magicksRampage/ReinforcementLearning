@@ -48,21 +48,21 @@ def fourier(o, P, v, phi):
         y.append(math.sin(arg))
     return numpy.array(y)
 
-env = gym.make('CartPole-v0')
+env = gym.make('Pendulum-v0')
 policies = []
 performance = []
 batchsize = 100
 numfeat = 10
-numobs = 4
+numobs = 3
 P = getP(numfeat,numobs)
-v = 1
+v = 8
 phi = getphi(numfeat)
 print([P, v, phi])
 
 for _ in range(batchsize):
     w = []
     for i in range(numfeat+2):
-        w.append(random.random() * 20 - 10)
+        w.append(random.gauss(0,1))
     policies.append(numpy.array(w))
     
 for gen in range(500):
@@ -72,6 +72,7 @@ for gen in range(500):
         iterations = 100
         for i in range(iterations):
             obs = env.reset()
+            #env.render()
             done = False
             action = 0
             reward = 0
@@ -85,7 +86,8 @@ for gen in range(500):
                     a = 1
                 else:
                     a = 0
-                obs, r, done, info = env.step(a)
+                obs, r, done, info = env.step([action])
+                #env.render()
                 reward += r
             totalr += reward
         performance.append(totalr / iterations)
@@ -120,7 +122,7 @@ for gen in range(500):
         child = numpy.concatenate([parent1[:cutoff], parent2[cutoff:]])
         mutate = int(math.floor(random.random() * (numfeat + 2)))
         if random.random() < 0.1:
-            child[mutate] = random.random() * 20 - 10
+            child[mutate] = random.gauss(0,1)
         newPols.append(child)
     policies = copyList(newPols)
     best = parents[90:]
@@ -128,3 +130,4 @@ for gen in range(500):
         policies.append(b[0])
 
     performance = []
+    env.close()
