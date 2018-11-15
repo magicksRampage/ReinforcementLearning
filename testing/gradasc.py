@@ -92,7 +92,8 @@ for gen in range(500):
     totalr = 0
     iterations = 100
     trajectories = []
-   
+    lrate = 0.1 /(gen +1)
+
     for i in range(iterations):
         traj = []
         obs = env.reset()
@@ -125,7 +126,8 @@ for gen in range(500):
         fisheravg = np.zeros([numfeat+2, numfeat+2])
     
     newOmega = omega
-    print(totalr / iterations)
+    print(['Generation',gen])
+    print(['Avg Reward', totalr / iterations])
     for traj in trajectories:
         g = 0
         fishermat = np.zeros([numfeat+2, numfeat+2])
@@ -169,4 +171,3 @@ for gen in range(500):
     print(['policy', policy])
     omega = newOmega
     print(['value',omega])  
-
