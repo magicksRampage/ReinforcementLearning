@@ -131,7 +131,7 @@ for gen in range(500):
     for traj in trajectories:
         g = 0
         fishermat = np.zeros([numfeat+2, numfeat+2])
-        rev = range(len(traj))
+        rev = list(range(len(traj)))
         rev.reverse()
         for i in rev:
             Gt = traj[i][3]
