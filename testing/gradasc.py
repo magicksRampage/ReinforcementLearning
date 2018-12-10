@@ -1,8 +1,9 @@
 import gym
+import quanser_robots
 import math
 import random
 import numpy as np
-
+import matplotlib.pyplot as plt
 
 
 
@@ -62,20 +63,21 @@ def linearvalue(features, params, t, T):
     return np.dot(features, params) * (Tmax-t) / Tmax
     
 
-env = gym.make('Pendulum-v0')
+env = gym.make('CartpoleStabShort-v0')
+#env = gym.make('Pendulum-v0')
 policy = []
 trajectories = [] #t, s, a, r, dlp
 batchsize = 100
-numfeat = 10
-numobs = 3
+numfeat = 20
+numobs = 5
 P = getP(numfeat,numobs)
 v = 10
 phi = getphi(numfeat)
 omega = []
 delta = 0.05
 discount = 0.99
-gaelambda = 0.90
-Tmax = 200.
+gaelambda = 0.9
+Tmax = 10000.
 lrate = 0.05
 
 for i in range(numfeat+2):
@@ -87,10 +89,12 @@ for i in range(numfeat):
     omega.append(random.gauss(0,1))
     #omega.append(0.)
 omega = np.array(omega)
+avgRewards = []
+render = False
 
 for gen in range(500):
     totalr = 0
-    iterations = 100
+    iterations = 5
     trajectories = []
     lrate = 0.1 /(gen +1)
 
@@ -113,9 +117,9 @@ for gen in range(500):
             #    a = -1
             else:
                 a = 0
-            obs, r, done, info = env.step([action])
-            if i == 10:
-               env.render()
+            obs, r, done, info = env.step(np.array([action]))
+            #if render:
+            #    env.render()
             traj.append([t, feat, action, r, derivative(action, feat, policy, mu)])
             reward += r
             t += 1
@@ -128,6 +132,11 @@ for gen in range(500):
     newOmega = omega
     print(['Generation',gen])
     print(['Avg Reward', totalr / iterations])
+    avgRewards.append(totalr/iterations)
+    if avgRewards[-1] > 500:
+        render = True
+    else:
+        render = False
     for traj in trajectories:
         g = 0
         fishermat = np.zeros([numfeat+2, numfeat+2])
@@ -168,6 +177,9 @@ for gen in range(500):
     
     update = math.sqrt(delta / (np.mat(gavg) * finverse * np.transpose(np.mat(gavg)))) * finverse * np.transpose(np.mat(gavg))
     policy += np.array(np.transpose(update))[0]
-    print(['policy', policy])
+    #print(['policy', policy])
     omega = newOmega
-    print(['value',omega])  
+    #print(['value',omega])  
+
+plt.scatter(range(len(avgRewards)), avgRewards)
+plt.show()
