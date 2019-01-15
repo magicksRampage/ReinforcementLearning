@@ -1,0 +1,54 @@
+import gym
+import quanser_robots
+import numpy as np
+
+
+"""
+General REPS-Routine:
+1. generate roll-outs according to pi_(i-1)
+2. calculate kernel embedding strengths
+3. minimize kernel-based dual
+4. calculate kernel-based Bellman errors
+5. calculate the sample weights
+6. fit a generalizing non-parametric policy
+--> until convergence
+"""
+
+def random_policy(state, space_high, space_low):
+    """
+
+    :param state:       state in which the agent has to act
+    :param space_high:  high end of the action space
+    :param space_low:   low end of the action space
+    :return: returns a sample from a equiprobable distribution over the action space
+    """
+
+    space_range = space_high - space_low
+    sample = space_range * np.random.random() + space_low
+    return sample
+
+def gaussian_policy(state, space_high, space_low, loc, scale):
+    """
+    
+    :param state:       state in which the agent has to act
+    :param space_high:  high end of the action space
+    :param space_low:   low end of the action space
+    :param loc:         mean of the gaussian
+    :param scale:       standard deviation of the gaussian
+    :return: returns a sample from a gaussian distribution over the action space
+    """
+
+    space_range = space_high - space_low
+    sample = np.random.normal(loc,scale)
+    return np.clip(sample, space_low, space_high)
+
+
+def main():
+    env = gym.make('Pendulum-v2')
+    env.reset()
+    deci = 0.55
+    for i in range(1000):
+        env.step((gaussian_policy(-1, 2, -2, 0, 0.5),))
+        env.render()
+
+main()
