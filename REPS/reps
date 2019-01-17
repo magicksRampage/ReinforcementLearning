@@ -1,7 +1,11 @@
 import gym
 import quanser_robots
 import numpy as np
+import errors as err
 
+POLICY_GAUSSIAN = 'gaussian'
+POLICY_RANDOM = 'random'
+ENV_PENDULUM = 'Pendulum-v2'
 
 """
 General REPS-Routine:
@@ -14,12 +18,12 @@ General REPS-Routine:
 --> until convergence
 """
 
-def random_policy(state, space_high, space_low):
+
+def random_policy(space_low, space_high):
     """
 
-    :param state:       state in which the agent has to act
-    :param space_high:  high end of the action space
-    :param space_low:   low end of the action space
+    :param space_low:  low end of the action space
+    :param space_high:   high end of the action space
     :return: returns a sample from a equiprobable distribution over the action space
     """
 
@@ -27,12 +31,12 @@ def random_policy(state, space_high, space_low):
     sample = space_range * np.random.random() + space_low
     return sample
 
-def gaussian_policy(state, space_high, space_low, loc, scale):
+def gaussian_policy(state, space_low, space_high, loc, scale):
     """
     
     :param state:       state in which the agent has to act
-    :param space_high:  high end of the action space
     :param space_low:   low end of the action space
+    :param space_high:  high end of the action space
     :param loc:         mean of the gaussian
     :param scale:       standard deviation of the gaussian
     :return: returns a sample from a gaussian distribution over the action space
@@ -42,13 +46,29 @@ def gaussian_policy(state, space_high, space_low, loc, scale):
     sample = np.random.normal(loc,scale)
     return np.clip(sample, space_low, space_high)
 
+def generate_episode(envName, policyName):
+    env = gym.make(envName)
+    env.reset()
+    samples = ()
+    action = 0
+    lowAction = env.action_space.low[0]
+    highAction = env.action_space.high[0]
+    for i in range(1,100):
+        if(policyName == POLICY_RANDOM):
+            action = random_policy(lowAction, highAction)
+        elif(policyName == POLICY_GAUSSIAN):
+            action = gaussian_policy(-1, lowAction, highAction, 0, 1)
+        else:
+            raise err.InvalidPolicyNameError
+        obs, reward, done, info = env.step((action,))
+        samples += ((obs, reward),)
+        env.render()
+
+    env.close()
+    return samples
 
 def main():
-    env = gym.make('Pendulum-v2')
-    env.reset()
-    deci = 0.55
-    for i in range(1000):
-        env.step((gaussian_policy(-1, 2, -2, 0, 0.5),))
-        env.render()
+    samples = generate_episode(ENV_PENDULUM, POLICY_GAUSSIAN)
+    print(samples)
 
 main()
