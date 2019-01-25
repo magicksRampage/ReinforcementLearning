@@ -39,8 +39,8 @@ def copyList(l):
     return copy
 
 def fourier(o, P, v, phi):
-#    return np.array(o)
-#def realfourier():
+    return np.array(o)
+def realfourier():
     y = []
     for i in range(numfeat - len(y)):
         arg = 0
@@ -64,16 +64,23 @@ def derivative(act, feat, pol, mu):
 def linearvalue(features, params, t, T):
     featpt = np.append(features, 1)
     return np.dot(featpt, params)
-    
+
+def leastsqumc(trajectories):
+    featuremat = np.zeros([numfeat,numfeat])
+    for ti in range(len(trajectories)):
+        traj = trajectories[ti]
+        for i in len(traj):
+            sample = traj[i]   
+            featuremat += np.transpose
 
 env = gym.make('CartpoleStabShort-v0')
 #env = gym.make('Pendulum-v0')
 policy = []
 trajectories = [] #t, s, a, r, dlp
 batchsize = 100
-numfeat = 30
+numfeat = 5
 numobs = env.observation_space.shape[0]
-randomfeatures = False
+randomfeatures = True
 if randomfeatures:
     P = getP(numfeat,numobs)
 else:
@@ -111,9 +118,9 @@ else:
 v = 0.2
 phi = getphi(numfeat)
 omega = []
-delta = 0.0000001
+delta = 0.001
 discount = 0.99
-gaelambda = 0.9
+gaelambda = 0.95
 Tmax = 10000.
 lrate = 0.05
 
@@ -121,7 +128,7 @@ for i in range(numfeat+2):
     policy.append(random.gauss(0,1))
 
 policy = np.array(policy)
-#policy[-1] = np.abs(1)
+policy[-1] = np.abs(1)
 #policy[0] = -1
 #policy[1] = 1000
 #policy[2] = 0
@@ -133,19 +140,19 @@ for i in range(numfeat+1):
     omega.append(random.gauss(0,1))
     #omega.append(0.)
 omega = np.array(omega)
-#omega[2] = -10
+omega[2] = -10
 print(omega)
 avgRewards = []
-render = False
+render = True
 
 for gen in range(5000):
     totalr = 0
-    iterations = 0
+    iterations = 20
     trajectories = []
     lrate = 0.1 /(gen+1)
     totalSamples = 0
-    #for i in range(iterations):
-    while totalSamples < 1000:
+    for i in range(iterations):
+    #while totalSamples < 10000:
         traj = []
         obs = env.reset()
         done = False
@@ -171,8 +178,8 @@ for gen in range(5000):
             else:
                 a = 0
             newobs, r, done, info = env.step(np.array([action]))
-            #if render:
-            #    env.render()
+            if render:
+                env.render()
             traj.append([t, obs, action, r, newobs, derivative(action, feat, policy, mu)])
             totalSamples += 1
             reward += r
@@ -180,11 +187,12 @@ for gen in range(5000):
             obs = newobs
         totalr += reward
         trajectories.append(traj)
-        iterations += 1
+        #iterations += 1
     fishermat = np.zeros([numfeat+2, numfeat+2])
     gavg = 0
     fisheravg = np.zeros([numfeat+2, numfeat+2])
-    
+    featuremat = np.zeros([numfeat+1, numfeat+1])
+    sumxv = 0
     newOmega = omega.copy()
     print(['Generation',gen])
     print(['Avg Reward', totalr / iterations])
@@ -209,13 +217,13 @@ for gen in range(5000):
         traj = trajectories[ti]
         g = np.zeros([1, numfeat+2])[0]
         fishermat = np.zeros([numfeat+2, numfeat+2])
-        rev = list(range(len(traj)))
-        rev.reverse()
+        totalrewards = list(range(len(traj)))
+        rev = range(len(traj)-2,-1,-1)
+        totalrewards[-1] = traj[-1][3]
         for i in rev:
             Gt = traj[i][3]
-            for j in range(i+1, len(traj)):
-                Gt += math.pow(discount, j-i) * traj[j][3]
-            traj[i].append(Gt)
+            Gt += discount * totalrewards[i+1]
+            totalrewards[i] = Gt
         #print(traj)
         for i in range(len(traj)):
             sample = traj[i]
@@ -231,38 +239,47 @@ for gen in range(5000):
             x2.append(sample[1][2])
             #x3.append(sample[1][3])
             #x4.append(sample[1][4])
-            t_values.append(sample[-1])
+            t_values.append(totalrewards[i])
             t_features.append(feat)
             y0.append(value)
             y1.append(sample[2])
             y2.append(value_new)
             y3.append(sample[5][1])
+            featp1 = fourier(sample[4], P, v, phi)
             valuep1 = linearvalue(fourier(sample[4], P, v, phi), omega, sample[0], len(traj))
             valuep1_new = linearvalue(fourier(sample[4], P, v, phi), newOmega, sample[0], len(traj))
             tempdiff = sample[3] + discount * valuep1 - value
             tempdiff_new = sample[3] + discount * valuep1_new - value_new
             #tempdiff = sample[3] + discount * samplep1[-1] - sample[-1]
+            mcdiff = totalrewards[i] - value_new
             #print([lrate, sample[5], value, sample[1]])
-            dOmega =  (sample[-1] - value_new) * np.append(feat, 1)
-            stepOmega = 50 / (500 + sample_no)# / np.dot(dOmega,dOmega)
-            newOmega += stepOmega * dOmega
+            #dOmega =  tempdiff_new * np.append(feat, 1)
+            #stepOmega = 50 / (500 + sample_no)# / np.dot(dOmega,dOmega)
+            #newOmega += stepOmega * dOmega
+            feat = np.append(feat, 1)
+            featp1 = np.append(featp1, 1)
+            featuremat += np.transpose(np.mat(feat)) * np.mat(feat)
+            sumxv += np.array(feat) * totalrewards[i]
             fishermat += np.transpose(np.mat(sample[5])) * np.mat(sample[5])
             traj[i].append(tempdiff)
         if True:
-            for i in range(len(traj)):
-                advest = 0
-                for j in range(i, len(traj)):
-                    sample = traj[j]
-                    advest += math.pow(discount * gaelambda, j-i) * sample[-1]
+            advantages = list(range(len(traj)))
+            advantages[-1] = traj[-1][-1]
+            for i in rev:
+                sample = traj[i]
+                advest = sample[-1]
+                advest += discount * gaelambda * advantages[i+1]
+                advantages[i] = advest
                 g += traj[i][5] * advest
             gavg += g / len(traj)
             fisheravg += fishermat / len(traj)
     gavg /= iterations #/ 2
     fisheravg /= iterations #/ 2
-    for line in fisheravg:
-        for i in range(len(line)):
-            if np.abs(line[i]) < 0.2:
-                line[i] = line[i]
+    newOmega = np.linalg.lstsq(featuremat,sumxv)[0] 
+    #for line in fisheravg:
+    #    for i in range(len(line)):
+    #        if np.abs(line[i]) < 0.2:
+    #            line[i] = line[i]
 
     #print(gavg)
     #print(fisheravg)
@@ -277,7 +294,7 @@ for gen in range(5000):
     #print(stepsize)
     #print(np.linalg.norm(update))
     policy += stepsize * update
-    policy[-1] = np.abs(policy[-1])
+    policy[-1] = max(policy[-1], 0.1)
     #print(update)
     print(['policy', policy])
     #omega = np.linalg.lstsq(t_features, t_values)[0]
@@ -293,9 +310,9 @@ for gen in range(5000):
         plt.show()   
         plt.scatter(x1, y1)
         plt.show()
+        plt.scatter(range(len(avgRewards)), avgRewards)
+        plt.show()
         #plt.scatter(x1, y3)
         #plt.show()
     print(['value',omega])  
 
-plt.scatter(range(len(avgRewards)), avgRewards)
-plt.show()
