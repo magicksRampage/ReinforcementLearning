@@ -6,7 +6,7 @@ import errors as err
 POLICY_GAUSSIAN = 'gaussian'
 POLICY_RANDOM = 'random'
 
-ENV_PENDULUM = 'Pendulum-v2'
+ENV_PENDULUM = 'Pendulum-v0'
 
 
 def random_policy(space_low, space_high):
@@ -70,10 +70,11 @@ def generate_episode(envName, policyName):
     return samples
 
 
-def evaluate_kernel():
+def evaluate_kernel(samples):
     # TODO: implement
     # TODO: diffentiate between K_sa and K_s
-    return np.array()
+    K_sa_ij = k_s(s_i,s)*k_a(a_i,a)
+    return np.zeros(0)
 
 
 def fast_minimization():
@@ -94,14 +95,14 @@ def update_step(old_policy):
 
     """ 2. calculate kernel embedding strengths """
 
-    beta = np.array()
-    K_sa = evaluate_kernel()
+    beta = np.zeros(0)
+    K_sa = evaluate_kernel(samples)
     # TODO: Extract k_sa as column from K_sa
-    k_sa = np.array
+    k_sa = np.zeros(0)
     l_C = 0.0
     # TODO: Is I the identity matrix?
-    I = np.array()
-    beta = np.matmul(np.linalg.inv(np.add(K_sa, l_C * I)), k_sa)
+    I = np.zeros(0)
+    #beta = np.matmul(np.linalg.inv(np.add(K_sa, l_C * I)), k_sa)
 
     """ 3. minimize kernel-based dual """
 
@@ -124,30 +125,32 @@ def update_step(old_policy):
 
     K_s = evaluate_kernel()
     # TODO: Extract k_s as a column from K_s
-    k_s = np.array()
+    k_s = np.zeros(0)
     # TODO: Where do we get R_as from?
-    R_as = np.array
+    R_as = np.zeros(0)
     # TODO: Gather all the deltas
-    delta_j = np.add(R_as, np.matmul(np.transpose(alpha), np.subtract(np.matmul(K_s, beta), k_s)))
+    #delta_j = np.add(R_as, np.matmul(np.transpose(alpha), np.subtract(np.matmul(K_s, beta), k_s)))
 
     """ 5. calculate the sample weights """
 
     # TODO: Gather all the weights
-    w_j = np.exp(delta_j / eta)
+    #w_j = np.exp(delta_j / eta)
 
     """ 6. fit a generalizing non-parametric policy"""
 
     # hyper-parameter
     l = 1
     # TODO: diagonal matrix with D_ii = 1 / w_i
-    D = np.array()
+    D = np.zeros(0)
     # TODO: A = [a_1, ..., a_n]^T
-    A = np.array()
-    mu = np.matmul(np.matmul(np.transpose(k_s), np.linalg.inv(np.add(K_s, l * D))), A)
+    A = np.zeros(0)
+    #mu = np.matmul(np.matmul(np.transpose(k_s), np.linalg.inv(np.add(K_s, l * D))), A)
+    mu = 0
     sigma_sq = 0.0
     new_policy = (mu, sigma_sq)
 
     return new_policy
+
 
 def main():
 
