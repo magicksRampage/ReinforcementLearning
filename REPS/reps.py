@@ -38,43 +38,96 @@ def gaussian_policy(state, space_low, space_high, loc, scale):
     return np.clip(sample, space_low, space_high)
 
 
-def generate_episode(envName, policyName):
+def generate_episode(env_name, policy_name):
     """
 
-    :param envName:     designation of the environment the agent will act in and thus from which he gets his samples
-    :param policyName:  designation of the policy pursued while generating the episode
+    :param env_name:     designation of the environment the agent will act in and thus from which he gets his samples
+    :param policy_name:  designation of the policy pursued while generating the episode
     :return: an array containing the sequence of samples generated in this episode
     """
-    env = gym.make(envName)
-    env.reset()
+    env = gym.make(env_name)
+    prev_obs = env.reset()
     samples = ()
     action = 0
     lowAction = env.action_space.low[0]
     highAction = env.action_space.high[0]
-    for i in range(1, 100):
+    for i in range(0, 100):
 
-        if policyName == POLICY_RANDOM:
+        if policy_name == POLICY_RANDOM:
             action = random_policy(lowAction, highAction)
 
-        elif policyName == POLICY_GAUSSIAN:
+        elif policy_name == POLICY_GAUSSIAN:
             action = gaussian_policy(-1, lowAction, highAction, 0, 1)
 
         else:
             raise err.InvalidPolicyNameError
 
         obs, reward, done, info = env.step((action,))
-        samples += ((obs, reward),)
+        samples += ((prev_obs, action, obs, reward),)
+        prev_obs = obs
         env.render()
 
     env.close()
     return samples
 
 
-def evaluate_kernel(samples):
-    # TODO: implement
-    # TODO: diffentiate between K_sa and K_s
-    K_sa_ij = k_s(s_i,s)*k_a(a_i,a)
-    return np.zeros(0)
+def evaluate_state_action_kernel(samples):
+    """
+
+    :param samples: set of state-action pairs available to calculate the state-action kernel
+    :return: Matrix (len(samples))X(len(samples)) defining the state-action kernel
+    """
+    number_of_samples = np.shape(samples)[0]
+    state_action_kernel = np.zeros((number_of_samples, number_of_samples))
+    sample_i = None
+    sample_j = None
+    state_kval= 0.0
+    action_kval = 0.0
+    for i in range(0, number_of_samples):
+        sample_i = samples[i]
+        for j in range(0, number_of_samples):
+            sample_j = samples[j]
+            state_kval = gaussian_kernel(sample_i[0], sample_j[0])
+            action_kval = gaussian_kernel(np.array([sample_i[1]]), np.array([sample_j[1]]))
+            state_action_kernel[i][j] = state_kval * action_kval
+    return state_action_kernel
+
+
+def gaussian_kernel(vec1, vec2, bandwidth_matrix=None):
+    """
+
+    :param vec1: first argument in vector form (scalars might cause problems due to np.transpose())
+    :param vec2: second argument in vector form (scalars might cause problems due to np.transpose())
+    :param bandwidth_matrix: Matrix defining the free bandwith parameters of a gaussian kernel (must be len(vec1) == len(vec2)
+    :return: scalar result of the kernel evaluation
+    """
+    dif_vec = vec1-vec2
+    if bandwidth_matrix is None:
+        bandwidth_matrix = np.identity(np.shape(dif_vec)[0])
+    return np.exp(np.matmul(np.matmul(-np.transpose(dif_vec), bandwidth_matrix), dif_vec))
+
+
+def calculate_beta(state, action, samples, K_sa, l_c=1.0):
+    """
+
+    :param state: state-argument put into beta(s,a)
+    :param action: action-argument put into beta(s,a)
+    :param samples: set of state-action pairs available to calculate beta(s,a)
+    :param K_sa: the pre-calculated state-action kernel matrix
+    :param l_c: regularization coefficient
+    :return:
+    """
+    number_of_samples = np.shape(samples)[0]
+    k_sa = np.zeros((number_of_samples, 1))
+    sample = None
+    for i in range(0,number_of_samples):
+        sample = samples[i]
+        state_kval = gaussian_kernel(sample[0], state)
+        action_kval = gaussian_kernel(np.array([sample[1]]), np.array([action]))
+        k_sa[i] = state_kval * action_kval
+    reg_mat = np.multiply(l_c, np.identity(number_of_samples))
+    beta = np.matmul(np.transpose(np.add(K_sa, reg_mat)),k_sa)
+    return beta
 
 
 def fast_minimization():
@@ -94,15 +147,9 @@ def update_step(old_policy):
     samples = generate_episode(ENV_PENDULUM, POLICY_GAUSSIAN)
 
     """ 2. calculate kernel embedding strengths """
-
-    beta = np.zeros(0)
-    K_sa = evaluate_kernel(samples)
-    # TODO: Extract k_sa as column from K_sa
-    k_sa = np.zeros(0)
-    l_C = 0.0
-    # TODO: Is I the identity matrix?
-    I = np.zeros(0)
-    #beta = np.matmul(np.linalg.inv(np.add(K_sa, l_C * I)), k_sa)
+    """ Which means prepare the Kernelmatrix so you can evaluate beta(s,a) """
+    K_sa = evaluate_state_action_kernel(samples)
+    test = calculate_beta(samples[0][0], samples[0][1], samples, K_sa)
 
     """ 3. minimize kernel-based dual """
 
@@ -123,7 +170,7 @@ def update_step(old_policy):
 
     """ 4. calculate kernel-based Bellman errors """
 
-    K_s = evaluate_kernel()
+    #K_s = evaluate_state_action_kernel()
     # TODO: Extract k_s as a column from K_s
     k_s = np.zeros(0)
     # TODO: Where do we get R_as from?
