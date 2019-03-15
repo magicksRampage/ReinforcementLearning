@@ -125,7 +125,7 @@ def gaussian_kernel(vec1, vec2, bandwidth_matrix=None):
     return np.exp(np.matmul(np.matmul(-np.transpose(dif_vec), bandwidth_matrix), dif_vec))
 
 
-def calculate_beta(state, action, samples, transition_kernel, l_c=1.0):
+def calculate_beta(state, action, samples, transition_kernel, l_c=-0.0):
     """
 
     :param state: state-argument for which to evaluate beta(s,a)
@@ -222,13 +222,15 @@ def minimize_dual_for_alpha(initial_alpha, eta, samples, number_of_iterations=10
             denominator = 0.0
             for j in range(i, number_of_samples):
                 denominator += np.exp(np.divide(bellman_errors[j], eta))
+                # TODO: Go to log domain if numeric instabilities arise
             weights[i] = np.divide(np.exp(np.divide(bellman_errors[i], eta)), denominator)
 
         partial = np.zeros((number_of_samples, 1))
         for i in range(0, number_of_samples):
             partial = np.add(partial, np.multiply(weights[i], embedding_vectors[:, i]).reshape((number_of_samples, 1)))
 
-        alpha = np.add(alpha, -partial)
+        # TODO: Define step-length (Hessian)
+        alpha = np.add(alpha, -partial*0.001)
 
     return alpha
 
@@ -236,7 +238,8 @@ def minimize_dual_for_alpha(initial_alpha, eta, samples, number_of_iterations=10
 def minimize_dual_for_eta():
     # Constrained opt
     # TODO: implement
-    return 0.0
+    # Eta factors into an exp() as a denominator ==> small eta breaks the code
+    return 1.0
 
 
 def strictly_bigger(vec1, vec2):
@@ -272,7 +275,7 @@ def update_step(old_policy):
 
     # iterate coordinate-descent (till constraints are sufficiently fulfilled)
     alpha = np.ones((number_of_samples, 1))*0.01
-    eta = 0.01
+    eta = 1
     # convergence threshold
     epsilon = 0.1
     for i in range(0, 10):
