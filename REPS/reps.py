@@ -81,7 +81,7 @@ def evaluate_state_action_kernel(samples):
     state_action_kernel = np.zeros((number_of_samples, number_of_samples))
     sample_i = None
     sample_j = None
-    state_kval= 0.0
+    state_kval = 0.0
     action_kval = 0.0
     for i in range(0, number_of_samples):
         sample_i = samples[i]
@@ -111,6 +111,42 @@ def evaluate_state_transition_kernel(samples):
     return state_transition_kernel
 
 
+def evaluate_dual(alpha, eta, samples, transition_kernel=None, state_action_kernel=None, embedding_vectors=None, epsilon=1.0):
+    """
+
+    :param alpha:
+    :param eta:
+    :param samples:
+    :param epsilon:
+    :param transition_kernel:
+    :param state_action_kernel:
+    :param embedding_vectors:
+    :return:
+    """
+    # TODO: Comment
+
+    number_of_samples = np.shape(samples)[0]
+    if transition_kernel is None:
+        # TODO: If transition_kernel is not given recalculate it
+        return None
+    if state_action_kernel is None:
+        # TODO: If state_action_kernel is not given recalculate it
+        return None
+    if embedding_vectors is None:
+        # TODO: If embedding_vectors are not given recalculate them
+        return None
+
+    bellman_error = 0.0
+    exp_term = 0.0
+    for i in range(0, number_of_samples):
+        sample = samples[i]
+        bellman_error = calculate_bellman_error(sample[3], alpha, embedding_vectors[:, i])
+        exp_term += (1/number_of_samples)*np.exp(bellman_error/eta)
+
+    g = eta*epsilon + eta*np.log(exp_term)
+    return g
+
+
 def gaussian_kernel(vec1, vec2, bandwidth_matrix=None):
     """
 
@@ -119,47 +155,49 @@ def gaussian_kernel(vec1, vec2, bandwidth_matrix=None):
     :param bandwidth_matrix: Matrix defining the free bandwidth parameters of a gaussian kernel (must be len(vec1) == len(vec2)
     :return: scalar result of the kernel evaluation
     """
-    dif_vec = vec1-vec2
+    dif_vec = vec1 - vec2
     if bandwidth_matrix is None:
         bandwidth_matrix = np.identity(np.shape(dif_vec)[0])
     return np.exp(np.matmul(np.matmul(-np.transpose(dif_vec), bandwidth_matrix), dif_vec))
 
 
-def calculate_beta(state, action, samples, transition_kernel, l_c=-0.0):
+def calculate_beta(state, action, samples, state_action_kernel, l_c=-0.0):
     """
 
     :param state: state-argument for which to evaluate beta(s,a)
     :param action: action-argument for which to evaluate beta(s,a)
     :param samples: set of state-action pairs available to calculate beta(s,a)
-    :param transition_kernel: the pre-calculated state-action kernel matrix
+    :param state_action_kernel: the pre-calculated state-action kernel matrix
     :param l_c: regularization coefficient
     :return: beta(s,a)
     """
     number_of_samples = np.shape(samples)[0]
     state_action_vec = np.zeros((number_of_samples, 1))
     sample = None
-    for i in range(0,number_of_samples):
+
+    for i in range(0, number_of_samples):
         sample = samples[i]
         state_kval = gaussian_kernel(sample[0], state)
         action_kval = gaussian_kernel(np.array([sample[1]]), np.array([action]))
         state_action_vec[i] = state_kval * action_kval
+
     reg_mat = np.multiply(l_c, np.identity(number_of_samples))
-    beta = np.matmul(np.transpose(np.add(transition_kernel, reg_mat)), state_action_vec)
+    beta = np.matmul(np.transpose(np.add(state_action_kernel, reg_mat)), state_action_vec)
     return beta
 
 
-def calculate_embedding_vector(state, action, samples, transition_kernel):
+def calculate_embedding_vector(state, action, samples, transition_kernel, state_action_kernel):
     """
 
     :param state: state-argument for which to evaluate the embedding vector
     :param action: action-argument for which to evaluate the embedding vector
     :param samples: set of state-action pairs available to calculate the embedding vector
     :param transition_kernel: the pre-calculated state-action kernel matrix
-    :param l_c: regularization coefficient
+    :param state_action_kernel:
     :return: the embedding vector (s,a) needed for the bellman-error
     """
 
-    beta = calculate_beta(state, action, samples, transition_kernel)
+    beta = calculate_beta(state, action, samples, state_action_kernel)
 
     number_of_samples = np.shape(samples)[0]
     transition_vec = np.zeros((number_of_samples, 1))
@@ -185,83 +223,105 @@ def calculate_bellman_error(reward, alpha, embedding_vector):
     return error
 
 
-def minimize_dual_for_alpha(initial_alpha, eta, samples, number_of_iterations=10):
+def minimize_dual(initial_alpha, initial_eta, samples, state_action_kernel):
+    transition_kernel = evaluate_state_transition_kernel(samples)
+    number_of_samples = np.shape(samples)[0]
+
+    embedding_vectors = np.zeros((number_of_samples, number_of_samples))
+    for i in range(0, number_of_samples):
+        sample = samples[i]
+        embedding_vectors[:, i] = calculate_embedding_vector(sample[0], sample[1], samples, transition_kernel,
+                                                             state_action_kernel).reshape(number_of_samples, )
+
+    alpha = initial_alpha
+    eta = initial_eta
+
+    dual_value = evaluate_dual(alpha, eta, samples, transition_kernel, state_action_kernel, embedding_vectors)
+    old_dual_value = np.inf
+
+    epsilon = 0.1
+    printint = 0
+    while (old_dual_value - dual_value) > 0.01:
+        old_dual_value = dual_value
+        # while (strictly_bigger(alpha, np.ones((number_of_samples, 1))*epsilon)) | (eta > epsilon):
+
+        # fast unconstrained convex optimization on alpha (fixed iterations)
+        alpha = minimize_dual_for_alpha(alpha, eta, samples, embedding_vectors)
+
+        # constrained minimization on eta (fixed iterations)
+        eta = minimize_dual_for_eta()
+        dual_value = evaluate_dual(alpha, eta, samples, transition_kernel, state_action_kernel, embedding_vectors)
+
+        printint += 1
+        print("iteration: ", printint, "\n")
+        print("Dual Value: ", dual_value, "\n")
+
+    return [alpha, eta]
+
+
+def minimize_dual_for_alpha(initial_alpha, eta, samples, embedding_vectors, number_of_iterations=10):
     """
 
     :param initial_alpha:
     :param eta:
     :param samples:
+    :param embedding_vectors:
     :param number_of_iterations:
     :return:
     """
     # TODO: Comment
+
     number_of_samples = np.shape(samples)[0]
-    transition_kernel = evaluate_state_transition_kernel(samples)
     alpha = initial_alpha
-
-    embedding_vectors = np.zeros((number_of_samples, number_of_samples))
-    for i in range(0, number_of_samples):
-        sample = samples[i]
-        embedding_vectors[:, i] = calculate_embedding_vector(sample[0], sample[1], samples, transition_kernel).reshape(number_of_samples,)
-
     # Initialize values but once
     bellman_errors = np.zeros((number_of_samples, 1))
     temp = np.zeros((number_of_samples, 1))
     weights = np.zeros((number_of_samples, 1))
-    denominator = None
+    log_denominator = 0.0
+    log_regulator = 0.0
+    new_log_regulator = 0.0
     partial = np.zeros((number_of_samples, 1))
 
     for descent in range(0, number_of_iterations):
-
+        log_regulator = new_log_regulator
         sample = None
         for i in range(0, number_of_samples):
             sample = samples[i]
             bellman_errors[i] = calculate_bellman_error(sample[3], alpha, embedding_vectors[:, i])
 
         for i in range(0, number_of_samples):
-            denominator = 0.0
+            log_denominator = 0.0
             for j in range(i, number_of_samples):
-                denominator += np.exp(np.divide(bellman_errors[j], eta))
+                # going to log space to avoid numerical issues
+                if np.divide(bellman_errors[j], eta) > new_log_regulator:
+                    new_log_regulator = np.divide(bellman_errors[j], eta)
+                elif np.divide(new_log_regulator, np.divide(bellman_errors[j], eta)):
+                    new_log_regulator = new_log_regulator / 2
+                log_denominator += np.exp(np.divide(bellman_errors[j], eta) - log_regulator)
                 # TODO: Go to log domain if numeric instabilities arise
-            weights[i] = np.divide(np.exp(np.divide(bellman_errors[i], eta)), denominator)
+                # Avoid crash by log(0)
+                if log_denominator == 0:
+                    log_denominator = 1.0e-10
+            weights[i] = np.exp(np.divide(bellman_errors[i], eta) - (np.log(log_denominator) + log_regulator))
 
         partial = np.zeros((number_of_samples, 1))
         for i in range(0, number_of_samples):
             partial = np.add(partial, np.multiply(weights[i], embedding_vectors[:, i]).reshape((number_of_samples, 1)))
 
         # TODO: Define step-length (Hessian)
-        alpha = np.add(alpha, -partial*0.001)
+        alpha = np.add(alpha, -partial * 0.005)
 
     return alpha
 
 
 def minimize_dual_for_eta():
     # Constrained opt
-    # TODO: implement
+    # TODO: !!! IMPLEMENT !!!
     # Eta factors into an exp() as a denominator ==> small eta breaks the code
+
     return 1.0
 
-
-def strictly_bigger(vec1, vec2):
-    """
-
-    :param vec1:
-    :param vec2:
-    :return:
-    """
-    # TODO: Comment
-    booleans = np.greater(vec1 , vec2)
-    bigger = True
-    for i in range(0, np.shape(booleans)[0]):
-        if bigger:
-            bigger = booleans[i]
-        else:
-            break
-    return bigger
-
-
 def update_step(old_policy):
-
     """ 1. generate roll-outs according to pi_(i-1) """
 
     samples = generate_episode(ENV_PENDULUM, POLICY_GAUSSIAN)
@@ -269,39 +329,29 @@ def update_step(old_policy):
 
     """ 2. calculate kernel embedding strengths """
     """ Which means prepare the Kernelmatrix so you can evaluate beta(s,a) """
-    K_sa = evaluate_state_action_kernel(samples)
+    state_action_kernel = evaluate_state_action_kernel(samples)
 
     """ 3. minimize kernel-based dual """
 
     # iterate coordinate-descent (till constraints are sufficiently fulfilled)
-    alpha = np.ones((number_of_samples, 1))*0.01
+    alpha = np.ones((number_of_samples, 1)) * 0.01
     eta = 1
-    # convergence threshold
-    epsilon = 0.1
-    for i in range(0, 10):
-    #while (strictly_bigger(alpha, np.ones((number_of_samples, 1))*epsilon)) | (eta > epsilon):
-
-        # fast unconstrained convex optimization on alpha (fixed iterations)
-        alpha = minimize_dual_for_alpha(alpha, eta, samples)
-
-        # constrained minimization on eta (fixed iterations)
-        for iteration in range(0, 10):
-            eta = minimize_dual_for_eta()
+    [alpha, eta] = minimize_dual(alpha, eta, samples, state_action_kernel)
 
     """ 4. calculate kernel-based Bellman errors """
 
-    #K_s = evaluate_state_action_kernel()
+    # K_s = evaluate_state_action_kernel()
     # TODO: Extract k_s as a column from K_s
     k_s = np.zeros(0)
     # TODO: Where do we get R_as from?
     R_as = np.zeros(0)
     # TODO: Gather all the deltas
-    #delta_j = np.add(R_as, np.matmul(np.transpose(alpha), np.subtract(np.matmul(K_s, beta), k_s)))
+    # delta_j = np.add(R_as, np.matmul(np.transpose(alpha), np.subtract(np.matmul(K_s, beta), k_s)))
 
     """ 5. calculate the sample weights """
 
     # TODO: Gather all the weights
-    #w_j = np.exp(delta_j / eta)
+    # w_j = np.exp(delta_j / eta)
 
     """ 6. fit a generalizing non-parametric policy"""
 
@@ -311,7 +361,7 @@ def update_step(old_policy):
     D = np.zeros(0)
     # TODO: A = [a_1, ..., a_n]^T
     A = np.zeros(0)
-    #mu = np.matmul(np.matmul(np.transpose(k_s), np.linalg.inv(np.add(K_s, l * D))), A)
+    # mu = np.matmul(np.matmul(np.transpose(k_s), np.linalg.inv(np.add(K_s, l * D))), A)
     mu = 0
     sigma_sq = 0.0
     new_policy = (mu, sigma_sq)
@@ -320,9 +370,8 @@ def update_step(old_policy):
 
 
 def main():
-
     converged = False
-    #Parameters for a gaussian policy (mu, sigma_sq)
+    # Parameters for a gaussian policy (mu, sigma_sq)
     policy = (0, 1)
     while not converged:
         policy = update_step(policy)
