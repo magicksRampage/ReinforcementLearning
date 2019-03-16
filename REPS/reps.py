@@ -111,6 +111,24 @@ def evaluate_state_transition_kernel(samples):
     return state_transition_kernel
 
 
+def penalty(eta):
+    """
+
+    :param eta: positive Lagrange-parameter
+    :return: penalty for an eta to close to 0
+    """
+    return -np.log(eta)
+
+
+def penalty_derivative(eta):
+    """
+
+    :param eta: positive Lagrange-parameter
+    :return: derivative of the penalty for an eta to close to 0
+    """
+    return -1/eta
+
+
 def evaluate_dual(alpha, eta, samples, transition_kernel=None, state_action_kernel=None, embedding_vectors=None, epsilon=1.0):
     """
 
@@ -143,7 +161,7 @@ def evaluate_dual(alpha, eta, samples, transition_kernel=None, state_action_kern
         bellman_error = calculate_bellman_error(sample[3], alpha, embedding_vectors[:, i])
         exp_term += (1/number_of_samples)*np.exp(bellman_error/eta)
 
-    g = eta*epsilon + eta*np.log(exp_term)
+    g = eta * epsilon + eta * np.log(exp_term) + penalty(eta)
     return g
 
 
@@ -161,7 +179,7 @@ def gaussian_kernel(vec1, vec2, bandwidth_matrix=None):
     return np.exp(np.matmul(np.matmul(-np.transpose(dif_vec), bandwidth_matrix), dif_vec))
 
 
-def calculate_beta(state, action, samples, state_action_kernel, l_c=-0.0):
+def calculate_beta(state, action, samples, state_action_kernel, l_c=-1.0):
     """
 
     :param state: state-argument for which to evaluate beta(s,a)
@@ -223,7 +241,52 @@ def calculate_bellman_error(reward, alpha, embedding_vector):
     return error
 
 
-def minimize_dual(initial_alpha, initial_eta, samples, state_action_kernel):
+def calculate_weights(samples, bellman_errors, eta):
+    """
+
+    :param samples:
+    :param bellman_errors:
+    :param eta:
+    :return:
+    """
+    # TODO: Comment
+
+    number_of_samples = np.shape(samples)[0]
+    weights = np.zeros((number_of_samples, 1))
+
+    for i in range(0, number_of_samples):
+        log_denominator = 0.0
+        log_regulator = 0.0
+
+        # Find the right regulator
+        for j in range(i, number_of_samples):
+            if np.divide(bellman_errors[j], eta) > log_regulator:
+                log_regulator = np.divide(bellman_errors[j], eta)
+
+        for j in range(i, number_of_samples):
+            # going to log space to avoid numerical issues
+            log_denominator += np.exp(np.divide(bellman_errors[j], eta) - log_regulator)
+            # Avoid crash by log(0)
+            # TODO: Find a more elegant way to avoid a crash
+            if log_denominator == 0:
+                log_denominator = 1.0e-10
+        weights[i] = np.exp(np.divide(bellman_errors[i], eta) - (np.log(log_denominator) + log_regulator))
+
+    return weights
+
+
+def minimize_dual(initial_alpha, initial_eta, samples, state_action_kernel, epsilon=1.0):
+    """
+
+    :param initial_alpha:
+    :param initial_eta:
+    :param samples:
+    :param state_action_kernel:
+    :param epsilon:
+    :return:
+    """
+    # TODO: Comment
+
     transition_kernel = evaluate_state_transition_kernel(samples)
     number_of_samples = np.shape(samples)[0]
 
@@ -239,22 +302,19 @@ def minimize_dual(initial_alpha, initial_eta, samples, state_action_kernel):
     dual_value = evaluate_dual(alpha, eta, samples, transition_kernel, state_action_kernel, embedding_vectors)
     old_dual_value = np.inf
 
-    epsilon = 0.1
-    printint = 0
-    while (old_dual_value - dual_value) > 0.01:
+    improvement = old_dual_value - dual_value
+    while improvement > 0.01:
         old_dual_value = dual_value
-        # while (strictly_bigger(alpha, np.ones((number_of_samples, 1))*epsilon)) | (eta > epsilon):
 
         # fast unconstrained convex optimization on alpha (fixed iterations)
         alpha = minimize_dual_for_alpha(alpha, eta, samples, embedding_vectors)
 
         # constrained minimization on eta (fixed iterations)
-        eta = minimize_dual_for_eta()
-        dual_value = evaluate_dual(alpha, eta, samples, transition_kernel, state_action_kernel, embedding_vectors)
+        eta = minimize_dual_for_eta(alpha, eta, samples, embedding_vectors, epsilon)
 
-        printint += 1
-        print("iteration: ", printint, "\n")
-        print("Dual Value: ", dual_value, "\n")
+        dual_value = evaluate_dual(alpha, eta, samples, transition_kernel, state_action_kernel, embedding_vectors)
+        improvement = old_dual_value - dual_value
+        old_dual_value = dual_value
 
     return [alpha, eta]
 
@@ -277,49 +337,82 @@ def minimize_dual_for_alpha(initial_alpha, eta, samples, embedding_vectors, numb
     bellman_errors = np.zeros((number_of_samples, 1))
     temp = np.zeros((number_of_samples, 1))
     weights = np.zeros((number_of_samples, 1))
-    log_denominator = 0.0
-    log_regulator = 0.0
-    new_log_regulator = 0.0
     partial = np.zeros((number_of_samples, 1))
 
     for descent in range(0, number_of_iterations):
-        log_regulator = new_log_regulator
         sample = None
         for i in range(0, number_of_samples):
             sample = samples[i]
             bellman_errors[i] = calculate_bellman_error(sample[3], alpha, embedding_vectors[:, i])
 
-        for i in range(0, number_of_samples):
-            log_denominator = 0.0
-            for j in range(i, number_of_samples):
-                # going to log space to avoid numerical issues
-                if np.divide(bellman_errors[j], eta) > new_log_regulator:
-                    new_log_regulator = np.divide(bellman_errors[j], eta)
-                elif np.divide(new_log_regulator, np.divide(bellman_errors[j], eta)):
-                    new_log_regulator = new_log_regulator / 2
-                log_denominator += np.exp(np.divide(bellman_errors[j], eta) - log_regulator)
-                # TODO: Go to log domain if numeric instabilities arise
-                # Avoid crash by log(0)
-                if log_denominator == 0:
-                    log_denominator = 1.0e-10
-            weights[i] = np.exp(np.divide(bellman_errors[i], eta) - (np.log(log_denominator) + log_regulator))
+        weights = calculate_weights(samples, bellman_errors, eta)
 
         partial = np.zeros((number_of_samples, 1))
+        # Ignore the penalty for eta as it is constant
         for i in range(0, number_of_samples):
             partial = np.add(partial, np.multiply(weights[i], embedding_vectors[:, i]).reshape((number_of_samples, 1)))
 
-        # TODO: Define step-length (Hessian)
-        alpha = np.add(alpha, -partial * 0.005)
+        # TODO: Refine step-length (hessian?)
+        alpha = np.add(alpha, -partial * 0.001)
 
     return alpha
 
 
-def minimize_dual_for_eta():
-    # Constrained opt
-    # TODO: !!! IMPLEMENT !!!
-    # Eta factors into an exp() as a denominator ==> small eta breaks the code
+def minimize_dual_for_eta(alpha, initial_eta, samples, embedding_vectors, epsilon, number_of_iterations=10):
+    """
 
-    return 1.0
+    :param alpha:
+    :param initial_eta:
+    :param samples:
+    :param embedding_vectors:
+    :param epsilon:
+    :param number_of_iterations:
+    :return:
+    """
+    # TODO: Comment
+
+    number_of_samples = np.shape(samples)[0]
+    eta = initial_eta
+    # Initialize values but once
+    bellman_errors = np.zeros((number_of_samples, 1))
+    weights = np.zeros((number_of_samples, 1))
+
+    sample = None
+    for i in range(0, number_of_samples):
+        sample = samples[i]
+        bellman_errors[i] = calculate_bellman_error(sample[3], alpha, embedding_vectors[:, i])
+
+    for descent in range(0, number_of_iterations):
+        weights = calculate_weights(samples, bellman_errors, eta)
+
+        partial = 0.0
+        weight_sum = 0.0
+
+        for i in range(0, number_of_samples):
+            weight_sum += weights[i]*bellman_errors[i]
+
+        log_sum = 0.0
+        log_regulator = -np.inf
+
+        # Find the right regulator
+        for i in range(0, number_of_samples):
+            if np.divide(bellman_errors[i], eta) > log_regulator:
+                log_regulator = np.divide(bellman_errors[i], eta)
+
+        for i in range(0, number_of_samples):
+            # going to log space to avoid numerical issues
+            log_sum += np.exp(np.divide(bellman_errors[i], eta) - log_regulator)
+            # Avoid crash by log(0)
+            # TODO: Find a more elegant way to avoid a crash
+            if log_sum == 0:
+                log_sum = 1.0e-10
+
+        partial = -(1/eta)*weight_sum + epsilon + np.log(log_sum) + log_regulator - np.log(number_of_samples) + penalty_derivative(eta)
+        # TODO: Refine step-length (hessian?)
+        eta = eta - partial*0.001
+
+    return eta
+
 
 def update_step(old_policy):
     """ 1. generate roll-outs according to pi_(i-1) """
