@@ -19,21 +19,23 @@ def random_policy(space_low, space_high):
     return sample
 
 
-def gaussian_policy(state, space_low, space_high, samples, transition_kernel, advantages, bandwidth_matrix=None, l=1.0):
+def gaussian_policy(state, space_low, space_high, alpha, eta, samples, transition_kernel, embedding_vectors, bandwidth_matrix=None, l=1.0):
     """
 
     :param state:
     :param space_low:
     :param space_high:
+    :param alpha:
+    :param eta:
     :param samples:
+    :param embedding_vectors:
     :param transition_kernel:
-    :param advantages:
     :param bandwidth_matrix:
     :param l:
     :return:
     """
     # TODO: Comment
-    # TODO: Hyperparameter D and l
+    # TODO: Hyper-parameter D and l
 
     number_of_samples = np.shape(samples)[0]
     if bandwidth_matrix is None:
@@ -44,6 +46,14 @@ def gaussian_policy(state, space_low, space_high, samples, transition_kernel, ad
     for i in range(0, number_of_samples):
         sample = samples[i]
         transition_vec[i] = gaussian_kernel(sample[0], state)
+
+    # weights are an estimate of the Advantage-function
+    bellman_errors = np.zeros((number_of_samples, 1))
+    for i in range(0, number_of_samples):
+        sample = samples[i]
+        bellman_errors[i] = calculate_bellman_error(sample[3], alpha, embedding_vectors[:, i])
+    advantages = calculate_weights(samples, bellman_errors, eta)
+
     inv_reg_kernel = np.linalg.inv(np.add(transition_kernel, l*bandwidth_matrix))
 
     mean = np.matmul(np.transpose(transition_vec), np.matmul(inv_reg_kernel, advantages))[0]
@@ -71,7 +81,7 @@ def sample_gaussian(space_low, space_high, mean, standard_deviation):
     return np.clip(sample, space_low, space_high)
 
 
-def generate_episode(env_name, old_samples=None, transition_kernel=None, advantages=None):
+def generate_episode(env_name, alpha=None, eta=None, old_samples=None, transition_kernel=None, embedding_vectors=None):
     """
 
     :param env_name:     designation of the environment the agent will act in and from which he thus gets his samples
@@ -86,13 +96,13 @@ def generate_episode(env_name, old_samples=None, transition_kernel=None, advanta
     low_action = env.action_space.low[0]
     high_action = env.action_space.high[0]
     action = 0
-    for i in range(0, 100):
+    for i in range(0, 50):
 
         if old_samples is None:
             action = random_policy(low_action, high_action)
 
         else:
-            action = gaussian_policy(prev_obs, low_action, high_action, old_samples, transition_kernel, advantages)[0]
+            action = gaussian_policy(prev_obs, low_action, high_action, alpha, eta, old_samples, transition_kernel, embedding_vectors)[0]
 
         obs, reward, done, info = env.step((action,))
         new_samples += ((prev_obs, action, obs, reward),)
@@ -324,27 +334,6 @@ def calculate_weights(samples, bellman_errors, eta):
     return weights
 
 
-def calculate_advantages(samples):
-    """
-
-    :param samples:
-    :return:
-    """
-    # TODO: Comment
-
-    number_of_samples = np.shape(samples)[0]
-    advantages = np.zeros((number_of_samples, 1))
-    sample = None
-
-    # TODO: Find an Interpretation of the advantage that doesnt just fall back onto the rewards
-    for i in range(0, number_of_samples):
-        sample = samples[i]
-        advantages[i] = sample[3]
-        # The rest of the equation just sort of cancels out because we only look at on string of event x)
-
-    return advantages
-
-
 def minimize_dual(initial_alpha, initial_eta, samples, transition_kernel, state_action_kernel, embedding_vectors, epsilon=1.0):
     """
 
@@ -373,21 +362,21 @@ def minimize_dual(initial_alpha, initial_eta, samples, transition_kernel, state_
         old_dual_value = temp_dual_value
 
         # fast unconstrained convex optimization on alpha (fixed iterations)
-        temp_alpha = minimize_dual_for_alpha(old_alpha, old_eta, samples, embedding_vectors)
+        temp_alpha = minimize_dual_for_alpha(old_alpha, old_eta, samples, embedding_vectors, 10, 0.001)
 
         # constrained minimization on eta (fixed iterations)
-        temp_eta = minimize_dual_for_eta(temp_alpha, old_eta, samples, embedding_vectors, epsilon)
+        temp_eta = minimize_dual_for_eta(temp_alpha, old_eta, samples, embedding_vectors, epsilon, 5, 0.0001)
 
         temp_dual_value = evaluate_dual(temp_alpha, temp_eta, samples, transition_kernel, state_action_kernel, embedding_vectors)
         improvement = old_dual_value - temp_dual_value
+
+        print(improvement, temp_eta, temp_dual_value)
         if improvement > 0.01:
             old_alpha = temp_alpha
             old_eta = temp_eta
             old_dual_value = temp_dual_value
         else:
             print("converged")
-
-        print(improvement, temp_eta, temp_dual_value)
 
     return [old_alpha, old_eta]
 
@@ -495,14 +484,27 @@ def minimize_dual_for_eta(alpha, initial_eta, samples, embedding_vectors, epsilo
 
 def update_step(old_policy_parameters):
     """ 1. generate roll-outs according to pi_(i-1) """
-    samples = None
+    temp_samples = None
+    old_samples = None
     if old_policy_parameters is None:
-        samples = generate_episode(ENV_PENDULUM)
+        temp_samples = generate_episode(ENV_PENDULUM)
     else:
-        old_samples = old_policy_parameters[0]
-        old_transition_kernel = old_policy_parameters[1]
-        old_advantages = old_policy_parameters[2]
-        samples = generate_episode(ENV_PENDULUM, old_samples, old_transition_kernel, old_advantages)
+        # (alpha, eta, samples, transition_kernel, embedding_vectors)
+        old_alpha = old_policy_parameters[0]
+        old_eta = old_policy_parameters[1]
+        old_samples = old_policy_parameters[2]
+        old_transition_kernel = old_policy_parameters[3]
+        old_embedding_vectors = old_policy_parameters[4]
+        temp_samples = generate_episode(ENV_PENDULUM, old_alpha, old_eta, old_samples, old_transition_kernel, old_embedding_vectors)
+
+    if not old_samples is None:
+        temp_samples = temp_samples + old_samples
+        # TODO: Generalize
+        if np.shape(temp_samples)[0] > 150:
+            temp_samples = temp_samples[:150]
+
+    samples = temp_samples
+    print(np.shape(temp_samples)[0])
 
     number_of_samples = np.shape(samples)[0]
 
@@ -544,9 +546,7 @@ def update_step(old_policy_parameters):
 
     space_low = None
     space_high = None
-    # TODO: Advantages seem to bind in the weights to the policy. Find the right way to calculate it
-    advantages = calculate_advantages(samples)
-    new_policy_parameters = (samples, transition_kernel, advantages)
+    new_policy_parameters = (alpha, eta, samples, transition_kernel, embedding_vectors)
     return new_policy_parameters
 
 
@@ -554,7 +554,7 @@ def main():
     converged = False
     # Parameters for a gaussian policy (mu, sigma_sq)
     policy = None
-    for i in range(0, 5):
+    for i in range(0, 100):
         # TODO: define conversion target
         policy = update_step(policy)
 
