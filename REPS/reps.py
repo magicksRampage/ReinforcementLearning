@@ -154,14 +154,27 @@ def evaluate_dual(alpha, eta, samples, transition_kernel=None, state_action_kern
         # TODO: If embedding_vectors are not given recalculate them
         return None
 
-    bellman_error = 0.0
-    exp_term = 0.0
+    bellman_errors = np.zeros((number_of_samples, 1))
+    log_sum = 0.0
+    log_regulator = -np.inf
+
+    sample = None
     for i in range(0, number_of_samples):
         sample = samples[i]
-        bellman_error = calculate_bellman_error(sample[3], alpha, embedding_vectors[:, i])
-        exp_term += (1/number_of_samples)*np.exp(bellman_error/eta)
+        bellman_errors[i] = calculate_bellman_error(sample[3], alpha, embedding_vectors[:, i])
 
-    g = eta * epsilon + eta * np.log(exp_term) + penalty(eta)
+    for i in range(0, number_of_samples):
+        if np.divide(bellman_errors[i], eta) > log_regulator:
+            log_regulator = np.divide(bellman_errors[i], eta)
+
+    for i in range(0, number_of_samples):
+        # going to log space to avoid numerical issues
+        log_sum += np.exp(np.divide(bellman_errors[i], eta) - log_regulator)
+        # Avoid crash by log(0)
+        # TODO: Find a more elegant way to avoid a crash
+        if log_sum == 0:
+            log_sum = 1.0e-10
+    g = eta * epsilon + eta * np.log(log_sum) + penalty(eta)
     return g
 
 
@@ -275,51 +288,54 @@ def calculate_weights(samples, bellman_errors, eta):
     return weights
 
 
-def minimize_dual(initial_alpha, initial_eta, samples, state_action_kernel, epsilon=1.0):
+def minimize_dual(initial_alpha, initial_eta, samples, transition_kernel, state_action_kernel, embedding_vectors, epsilon=1.0):
     """
 
     :param initial_alpha:
     :param initial_eta:
     :param samples:
+    :param  transition_kernel:
     :param state_action_kernel:
+    :param embedding_vectors:
     :param epsilon:
     :return:
     """
     # TODO: Comment
-
-    transition_kernel = evaluate_state_transition_kernel(samples)
     number_of_samples = np.shape(samples)[0]
 
-    embedding_vectors = np.zeros((number_of_samples, number_of_samples))
-    for i in range(0, number_of_samples):
-        sample = samples[i]
-        embedding_vectors[:, i] = calculate_embedding_vector(sample[0], sample[1], samples, transition_kernel,
-                                                             state_action_kernel).reshape(number_of_samples, )
+    old_alpha = initial_alpha
+    old_eta = initial_eta
+    temp_alpha = None
+    temp_eta = None
 
-    alpha = initial_alpha
-    eta = initial_eta
-
-    dual_value = evaluate_dual(alpha, eta, samples, transition_kernel, state_action_kernel, embedding_vectors)
+    temp_dual_value = evaluate_dual(old_alpha, old_eta, samples, transition_kernel, state_action_kernel, embedding_vectors)
     old_dual_value = np.inf
 
-    improvement = old_dual_value - dual_value
+    improvement = old_dual_value - temp_dual_value
     while improvement > 0.01:
-        old_dual_value = dual_value
+        old_dual_value = temp_dual_value
 
         # fast unconstrained convex optimization on alpha (fixed iterations)
-        alpha = minimize_dual_for_alpha(alpha, eta, samples, embedding_vectors)
+        temp_alpha = minimize_dual_for_alpha(old_alpha, old_eta, samples, embedding_vectors)
 
         # constrained minimization on eta (fixed iterations)
-        eta = minimize_dual_for_eta(alpha, eta, samples, embedding_vectors, epsilon)
+        temp_eta = minimize_dual_for_eta(temp_alpha, old_eta, samples, embedding_vectors, epsilon)
 
-        dual_value = evaluate_dual(alpha, eta, samples, transition_kernel, state_action_kernel, embedding_vectors)
-        improvement = old_dual_value - dual_value
-        old_dual_value = dual_value
+        temp_dual_value = evaluate_dual(temp_alpha, temp_eta, samples, transition_kernel, state_action_kernel, embedding_vectors)
+        improvement = old_dual_value - temp_dual_value
+        if improvement > 0.01:
+            old_alpha = temp_alpha
+            old_eta = temp_eta
+            old_dual_value = temp_dual_value
+        else:
+            print("converged")
 
-    return [alpha, eta]
+        print(improvement, temp_eta, temp_dual_value)
+
+    return [old_alpha, old_eta]
 
 
-def minimize_dual_for_alpha(initial_alpha, eta, samples, embedding_vectors, number_of_iterations=10):
+def minimize_dual_for_alpha(initial_alpha, eta, samples, embedding_vectors, number_of_iterations=10, step_size=0.001):
     """
 
     :param initial_alpha:
@@ -327,6 +343,7 @@ def minimize_dual_for_alpha(initial_alpha, eta, samples, embedding_vectors, numb
     :param samples:
     :param embedding_vectors:
     :param number_of_iterations:
+    :param step_size:
     :return:
     """
     # TODO: Comment
@@ -353,12 +370,12 @@ def minimize_dual_for_alpha(initial_alpha, eta, samples, embedding_vectors, numb
             partial = np.add(partial, np.multiply(weights[i], embedding_vectors[:, i]).reshape((number_of_samples, 1)))
 
         # TODO: Refine step-length (hessian?)
-        alpha = np.add(alpha, -partial * 0.001)
+        alpha = np.add(alpha, -partial * step_size)
 
     return alpha
 
 
-def minimize_dual_for_eta(alpha, initial_eta, samples, embedding_vectors, epsilon, number_of_iterations=10):
+def minimize_dual_for_eta(alpha, initial_eta, samples, embedding_vectors, epsilon, number_of_iterations=10, step_size=0.001):
     """
 
     :param alpha:
@@ -367,6 +384,7 @@ def minimize_dual_for_eta(alpha, initial_eta, samples, embedding_vectors, epsilo
     :param embedding_vectors:
     :param epsilon:
     :param number_of_iterations:
+    :param step_size:
     :return:
     """
     # TODO: Comment
@@ -409,7 +427,11 @@ def minimize_dual_for_eta(alpha, initial_eta, samples, embedding_vectors, epsilo
 
         partial = -(1/eta)*weight_sum + epsilon + np.log(log_sum) + log_regulator - np.log(number_of_samples) + penalty_derivative(eta)
         # TODO: Refine step-length (hessian?)
-        eta = eta - partial*0.001
+        eta = eta - partial*step_size
+        # Clamp eta to be non zero
+        # TODO: Find a real way to handle the instability
+        if eta < 0.01:
+            eta = 0.01
 
     return eta
 
@@ -421,43 +443,44 @@ def update_step(old_policy):
     number_of_samples = np.shape(samples)[0]
 
     """ 2. calculate kernel embedding strengths """
-    """ Which means prepare the Kernelmatrix so you can evaluate beta(s,a) """
+    """ 
+        Which means prepare the embedding vectors [K_s*beta(s_i,a_i) - k_s(s_i)]
+        The state_action_kernel binds states to corresponding actions 
+        The transition_kernel binds states to following states (independent of actions) 
+    """
     state_action_kernel = evaluate_state_action_kernel(samples)
+    transition_kernel = evaluate_state_transition_kernel(samples)
+
+    embedding_vectors = np.zeros((number_of_samples, number_of_samples))
+    for i in range(0, number_of_samples):
+        sample = samples[i]
+        embedding_vectors[:, i] = calculate_embedding_vector(sample[0], sample[1], samples, transition_kernel,
+                                                             state_action_kernel).reshape(number_of_samples, )
 
     """ 3. minimize kernel-based dual """
 
     # iterate coordinate-descent (till constraints are sufficiently fulfilled)
     alpha = np.ones((number_of_samples, 1)) * 0.01
     eta = 1
-    [alpha, eta] = minimize_dual(alpha, eta, samples, state_action_kernel)
+    [alpha, eta] = minimize_dual(alpha, eta, samples, transition_kernel, state_action_kernel, embedding_vectors)
 
     """ 4. calculate kernel-based Bellman errors """
 
-    # K_s = evaluate_state_action_kernel()
-    # TODO: Extract k_s as a column from K_s
-    k_s = np.zeros(0)
-    # TODO: Where do we get R_as from?
-    R_as = np.zeros(0)
-    # TODO: Gather all the deltas
-    # delta_j = np.add(R_as, np.matmul(np.transpose(alpha), np.subtract(np.matmul(K_s, beta), k_s)))
+    bellman_errors = np.zeros((number_of_samples, 1))
+    for i in range(0, number_of_samples):
+        sample = samples[i]
+        bellman_errors[i] = calculate_bellman_error(sample[3], alpha, embedding_vectors[:, i])
 
     """ 5. calculate the sample weights """
 
-    # TODO: Gather all the weights
-    # w_j = np.exp(delta_j / eta)
+    weights = np.zeros((number_of_samples, 1))
+    weights = calculate_weights(samples, bellman_errors, eta)
 
     """ 6. fit a generalizing non-parametric policy"""
 
     # hyper-parameter
-    l = 1
-    # TODO: diagonal matrix with D_ii = 1 / w_i
-    D = np.zeros(0)
-    # TODO: A = [a_1, ..., a_n]^T
-    A = np.zeros(0)
-    # mu = np.matmul(np.matmul(np.transpose(k_s), np.linalg.inv(np.add(K_s, l * D))), A)
-    mu = 0
-    sigma_sq = 0.0
-    new_policy = (mu, sigma_sq)
+    print("Please implement the policy fitting :)")
+    new_policy = None
 
     return new_policy
 
