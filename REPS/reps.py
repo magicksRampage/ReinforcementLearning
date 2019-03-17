@@ -3,9 +3,6 @@ import quanser_robots
 import numpy as np
 import errors as err
 
-POLICY_GAUSSIAN = 'gaussian'
-POLICY_RANDOM = 'random'
-
 ENV_PENDULUM = 'Pendulum-v0'
 
 
@@ -22,53 +19,88 @@ def random_policy(space_low, space_high):
     return sample
 
 
-def gaussian_policy(state, space_low, space_high, loc, scale):
+def gaussian_policy(state, space_low, space_high, samples, transition_kernel, advantages, bandwidth_matrix=None, l=1.0):
     """
-    
-    :param state:       state in which the agent has to act
+
+    :param state:
+    :param space_low:
+    :param space_high:
+    :param samples:
+    :param transition_kernel:
+    :param advantages:
+    :param bandwidth_matrix:
+    :param l:
+    :return:
+    """
+    # TODO: Comment
+    # TODO: Hyperparameter D and l
+
+    number_of_samples = np.shape(samples)[0]
+    if bandwidth_matrix is None:
+        bandwidth_matrix = np.identity(number_of_samples)
+
+    transition_vec = np.zeros((number_of_samples, 1))
+    sample = None
+    for i in range(0, number_of_samples):
+        sample = samples[i]
+        transition_vec[i] = gaussian_kernel(sample[0], state)
+    inv_reg_kernel = np.linalg.inv(np.add(transition_kernel, l*bandwidth_matrix))
+
+    mean = np.matmul(np.transpose(transition_vec), np.matmul(inv_reg_kernel, advantages))[0]
+    variance = gaussian_kernel(state, state) + l - np.matmul(np.transpose(transition_vec), np.matmul(inv_reg_kernel, transition_vec))[0]
+    if variance < 0:
+        print("Pls check variance!")
+    standard_deviation = np.sqrt(variance)
+    action = sample_gaussian(space_low, space_high, mean, standard_deviation)
+
+    return action
+
+
+def sample_gaussian(space_low, space_high, mean, standard_deviation):
+    """
+
     :param space_low:   low end of the action space
     :param space_high:  high end of the action space
-    :param loc:         mean of the gaussian
-    :param scale:       standard deviation of the gaussian
+    :param mean:         mean of the gaussian
+    :param standard_deviation:       standard deviation of the gaussian
     :return: a sample from a gaussian distribution over the action space
     """
 
     space_range = space_high - space_low
-    sample = np.random.normal(loc, scale)
+    sample = np.random.normal(mean, standard_deviation)
     return np.clip(sample, space_low, space_high)
 
 
-def generate_episode(env_name, policy_name):
+def generate_episode(env_name, old_samples=None, transition_kernel=None, advantages=None):
     """
 
-    :param env_name:     designation of the environment the agent will act in and thus from which he gets his samples
-    :param policy_name:  designation of the policy pursued while generating the episode
+    :param env_name:     designation of the environment the agent will act in and from which he thus gets his samples
+    :param old_samples:
+    :param transition_kernel:
+    :param advantages:
     :return: an array containing the sequence of samples generated in this episode
     """
     env = gym.make(env_name)
     prev_obs = env.reset()
-    samples = ()
+    new_samples = ()
+    low_action = env.action_space.low[0]
+    high_action = env.action_space.high[0]
     action = 0
-    lowAction = env.action_space.low[0]
-    highAction = env.action_space.high[0]
     for i in range(0, 100):
 
-        if policy_name == POLICY_RANDOM:
-            action = random_policy(lowAction, highAction)
-
-        elif policy_name == POLICY_GAUSSIAN:
-            action = gaussian_policy(-1, lowAction, highAction, 0, 1)
+        if old_samples is None:
+            action = random_policy(low_action, high_action)
 
         else:
-            raise err.InvalidPolicyNameError
+            action = gaussian_policy(prev_obs, low_action, high_action, old_samples, transition_kernel, advantages)[0]
 
         obs, reward, done, info = env.step((action,))
-        samples += ((prev_obs, action, obs, reward),)
+        new_samples += ((prev_obs, action, obs, reward),)
         prev_obs = obs
         env.render()
 
     env.close()
-    return samples
+    return new_samples
 
 
 def evaluate_state_action_kernel(samples):
@@ -186,10 +218,14 @@ def gaussian_kernel(vec1, vec2, bandwidth_matrix=None):
     :param bandwidth_matrix: Matrix defining the free bandwidth parameters of a gaussian kernel (must be len(vec1) == len(vec2)
     :return: scalar result of the kernel evaluation
     """
+    # TODO: Hyperparameter D
     dif_vec = vec1 - vec2
     if bandwidth_matrix is None:
         bandwidth_matrix = np.identity(np.shape(dif_vec)[0])
-    return np.exp(np.matmul(np.matmul(-np.transpose(dif_vec), bandwidth_matrix), dif_vec))
+    result = np.exp(np.matmul(np.matmul(-np.transpose(dif_vec), bandwidth_matrix), dif_vec))
+    if not np.isscalar(result):
+        print("WTF?")
+    return result
 
 
 def calculate_beta(state, action, samples, state_action_kernel, l_c=-1.0):
@@ -286,6 +322,27 @@ def calculate_weights(samples, bellman_errors, eta):
         weights[i] = np.exp(np.divide(bellman_errors[i], eta) - (np.log(log_denominator) + log_regulator))
 
     return weights
+
+
+def calculate_advantages(samples):
+    """
+
+    :param samples:
+    :return:
+    """
+    # TODO: Comment
+
+    number_of_samples = np.shape(samples)[0]
+    advantages = np.zeros((number_of_samples, 1))
+    sample = None
+
+    # TODO: Find an Interpretation of the advantage that doesnt just fall back onto the rewards
+    for i in range(0, number_of_samples):
+        sample = samples[i]
+        advantages[i] = sample[3]
+        # The rest of the equation just sort of cancels out because we only look at on string of event x)
+
+    return advantages
 
 
 def minimize_dual(initial_alpha, initial_eta, samples, transition_kernel, state_action_kernel, embedding_vectors, epsilon=1.0):
@@ -436,10 +493,17 @@ def minimize_dual_for_eta(alpha, initial_eta, samples, embedding_vectors, epsilo
     return eta
 
 
-def update_step(old_policy):
+def update_step(old_policy_parameters):
     """ 1. generate roll-outs according to pi_(i-1) """
+    samples = None
+    if old_policy_parameters is None:
+        samples = generate_episode(ENV_PENDULUM)
+    else:
+        old_samples = old_policy_parameters[0]
+        old_transition_kernel = old_policy_parameters[1]
+        old_advantages = old_policy_parameters[2]
+        samples = generate_episode(ENV_PENDULUM, old_samples, old_transition_kernel, old_advantages)
 
-    samples = generate_episode(ENV_PENDULUM, POLICY_GAUSSIAN)
     number_of_samples = np.shape(samples)[0]
 
     """ 2. calculate kernel embedding strengths """
@@ -478,21 +542,21 @@ def update_step(old_policy):
 
     """ 6. fit a generalizing non-parametric policy"""
 
-    # hyper-parameter
-    print("Please implement the policy fitting :)")
-    new_policy = None
-
-    return new_policy
+    space_low = None
+    space_high = None
+    # TODO: Advantages seem to bind in the weights to the policy. Find the right way to calculate it
+    advantages = calculate_advantages(samples)
+    new_policy_parameters = (samples, transition_kernel, advantages)
+    return new_policy_parameters
 
 
 def main():
     converged = False
     # Parameters for a gaussian policy (mu, sigma_sq)
-    policy = (0, 1)
-    while not converged:
-        policy = update_step(policy)
+    policy = None
+    for i in range(0, 5):
         # TODO: define conversion target
-        converged = True
+        policy = update_step(policy)
 
 
 main()
