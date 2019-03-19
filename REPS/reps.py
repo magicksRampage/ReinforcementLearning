@@ -1,6 +1,7 @@
 import gym
 import quanser_robots
 import numpy as np
+import time
 import errors as err
 
 ENV_PENDULUM = 'Pendulum-v0'
@@ -19,7 +20,7 @@ def random_policy(space_low, space_high):
     return sample
 
 
-def gaussian_policy(state, space_low, space_high, alpha, eta, samples, transition_kernel, embedding_vectors, bandwidth_matrix=None, l=1.0):
+def gaussian_policy(state, space_low, space_high, alpha, eta, samples, inverted_kernel, advantages, l):
     """
 
     :param state:
@@ -28,18 +29,15 @@ def gaussian_policy(state, space_low, space_high, alpha, eta, samples, transitio
     :param alpha:
     :param eta:
     :param samples:
-    :param embedding_vectors:
-    :param transition_kernel:
-    :param bandwidth_matrix:
-    :param l:
+    :param inverted_kernel:
+    :param advantages:
+    :param l
     :return:
     """
     # TODO: Comment
     # TODO: Hyper-parameter D and l
 
     number_of_samples = np.shape(samples)[0]
-    if bandwidth_matrix is None:
-        bandwidth_matrix = np.identity(number_of_samples)
 
     transition_vec = np.zeros((number_of_samples, 1))
     sample = None
@@ -47,17 +45,8 @@ def gaussian_policy(state, space_low, space_high, alpha, eta, samples, transitio
         sample = samples[i]
         transition_vec[i] = gaussian_kernel(sample[0], state)
 
-    # weights are an estimate of the Advantage-function
-    bellman_errors = np.zeros((number_of_samples, 1))
-    for i in range(0, number_of_samples):
-        sample = samples[i]
-        bellman_errors[i] = calculate_bellman_error(sample[3], alpha, embedding_vectors[:, i])
-    advantages = calculate_weights(samples, bellman_errors, eta)
-
-    inv_reg_kernel = np.linalg.inv(np.add(transition_kernel, l*bandwidth_matrix))
-
-    mean = np.matmul(np.transpose(transition_vec), np.matmul(inv_reg_kernel, advantages))[0]
-    variance = gaussian_kernel(state, state) + l - np.matmul(np.transpose(transition_vec), np.matmul(inv_reg_kernel, transition_vec))[0]
+    mean = np.matmul(np.transpose(transition_vec), np.matmul(inverted_kernel, advantages))[0]
+    variance = gaussian_kernel(state, state) + l - np.matmul(np.transpose(transition_vec), np.matmul(inverted_kernel, transition_vec))[0]
     if variance < 0:
         print("Pls check variance!")
     standard_deviation = np.sqrt(variance)
@@ -81,7 +70,7 @@ def sample_gaussian(space_low, space_high, mean, standard_deviation):
     return np.clip(sample, space_low, space_high)
 
 
-def generate_episode(env_name, alpha=None, eta=None, old_samples=None, transition_kernel=None, embedding_vectors=None):
+def generate_episode(env_name, alpha=None, eta=None, old_samples=None, transition_kernel=None, embedding_vectors=None, bandwidth_matrix=None, l=1.0):
     """
 
     :param env_name:     designation of the environment the agent will act in and from which he thus gets his samples
@@ -96,13 +85,30 @@ def generate_episode(env_name, alpha=None, eta=None, old_samples=None, transitio
     low_action = env.action_space.low[0]
     high_action = env.action_space.high[0]
     action = 0
-    for i in range(0, 50):
+
+    inv_reg_kernel = None
+
+    if bandwidth_matrix is None:
+        if old_samples is not None:
+            number_of_old_samples = np.shape(old_samples)[0]
+            bandwidth_matrix = np.identity(number_of_old_samples)
+            inv_reg_kernel = np.linalg.inv(np.add(transition_kernel, l*bandwidth_matrix))
+
+            # weights are an estimate of the Advantage-function
+            bellman_errors = np.zeros((number_of_old_samples, 1))
+            for i in range(0, number_of_old_samples):
+                sample = old_samples[i]
+                bellman_errors[i] = calculate_bellman_error(sample[3], alpha, embedding_vectors[:, i])
+
+            advantages = calculate_weights(old_samples, bellman_errors, eta)
+
+    for i in range(0, 100):
 
         if old_samples is None:
             action = random_policy(low_action, high_action)
 
         else:
-            action = gaussian_policy(prev_obs, low_action, high_action, alpha, eta, old_samples, transition_kernel, embedding_vectors)[0]
+            action = gaussian_policy(prev_obs, low_action, high_action, alpha, eta, old_samples, inv_reg_kernel, advantages, l)[0]
 
         obs, reward, done, info = env.step((action,))
         new_samples += ((prev_obs, action, obs, reward),)
@@ -229,12 +235,10 @@ def gaussian_kernel(vec1, vec2, bandwidth_matrix=None):
     :return: scalar result of the kernel evaluation
     """
     # TODO: Hyperparameter D
-    dif_vec = vec1 - vec2
+    dif_vec = (vec1 - vec2).astype(np.float32)
     if bandwidth_matrix is None:
-        bandwidth_matrix = np.identity(np.shape(dif_vec)[0])
+        bandwidth_matrix = np.identity(np.shape(dif_vec)[0], np.float32)
     result = np.exp(np.matmul(np.matmul(-np.transpose(dif_vec), bandwidth_matrix), dif_vec))
-    if not np.isscalar(result):
-        print("WTF?")
     return result
 
 
@@ -248,18 +252,28 @@ def calculate_beta(state, action, samples, state_action_kernel, l_c=-1.0):
     :param l_c: regularization coefficient
     :return: beta(s,a)
     """
+    start_time = time.clock()
+    kernel_time = 0.0
+
     number_of_samples = np.shape(samples)[0]
     state_action_vec = np.zeros((number_of_samples, 1))
     sample = None
 
     for i in range(0, number_of_samples):
         sample = samples[i]
+
+        # before_kernel = time.clock()
         state_kval = gaussian_kernel(sample[0], state)
         action_kval = gaussian_kernel(np.array([sample[1]]), np.array([action]))
+        # kernel_time += time.clock() - before_kernel
+
         state_action_vec[i] = state_kval * action_kval
 
     reg_mat = np.multiply(l_c, np.identity(number_of_samples))
     beta = np.matmul(np.transpose(np.add(state_action_kernel, reg_mat)), state_action_vec)
+
+    # print("--- %s percent --- kernel_time" % (round(kernel_time / (time.clock() - start_time), 2)))
+
     return beta
 
 
@@ -274,16 +288,31 @@ def calculate_embedding_vector(state, action, samples, transition_kernel, state_
     :return: the embedding vector (s,a) needed for the bellman-error
     """
 
+    start_time = time.clock()
+    last_time = start_time
+
     beta = calculate_beta(state, action, samples, state_action_kernel)
+
+    beta_time = time.clock() - last_time
+    last_time = time.clock()
 
     number_of_samples = np.shape(samples)[0]
     transition_vec = np.zeros((number_of_samples, 1))
     sample = None
     for i in range(0, number_of_samples):
-        sample = samples[i]
-        transition_vec[i] = gaussian_kernel(sample[0], state)
+        transition_vec[i] = gaussian_kernel(samples[i][0], state)
+
+    transition_time = time.clock() - last_time
+    last_time = time.clock()
 
     embedding_vec = np.add(np.matmul(transition_kernel, beta), -transition_vec)
+
+    matrix_time = time.clock() - last_time
+    full_time = time.clock() - start_time
+    # print("--- %s percent --- calculate_beta" % (round(beta_time / full_time, 2)))
+    # print("--- %s percent --- transition_vec" % (round(transition_time / full_time, 2)))
+    # print("--- %s percent --- matrices" % (round(matrix_time / full_time, 2)))
+
     return embedding_vec
 
 
@@ -347,6 +376,12 @@ def minimize_dual(initial_alpha, initial_eta, samples, transition_kernel, state_
     :return:
     """
     # TODO: Comment
+    start_time = time.clock()
+    full_eval_time = 0.0
+    full_alpha_time = 0.0
+    full_eta_time = 0.0
+    last_time = start_time
+
     number_of_samples = np.shape(samples)[0]
 
     old_alpha = initial_alpha
@@ -357,18 +392,35 @@ def minimize_dual(initial_alpha, initial_eta, samples, transition_kernel, state_
     temp_dual_value = evaluate_dual(old_alpha, old_eta, samples, transition_kernel, state_action_kernel, embedding_vectors)
     old_dual_value = np.inf
 
+    eval_time = time.clock() - last_time
+    full_eval_time += eval_time
+    last_time = time.clock()
+
     improvement = old_dual_value - temp_dual_value
     while improvement > 0.01:
         old_dual_value = temp_dual_value
 
         # fast unconstrained convex optimization on alpha (fixed iterations)
-        temp_alpha = minimize_dual_for_alpha(old_alpha, old_eta, samples, embedding_vectors, 10, 0.001)
+        temp_alpha = minimize_dual_for_alpha(old_alpha, old_eta, samples, embedding_vectors, 3, 0.001)
+
+        alpha_time = time.clock() - last_time
+        last_time = time.clock()
 
         # constrained minimization on eta (fixed iterations)
-        temp_eta = minimize_dual_for_eta(temp_alpha, old_eta, samples, embedding_vectors, epsilon, 5, 0.0001)
+        temp_eta = minimize_dual_for_eta(temp_alpha, old_eta, samples, embedding_vectors, epsilon, 2, 0.0001)
+
+        eta_time = time.clock() - last_time
+        last_time = time.clock()
 
         temp_dual_value = evaluate_dual(temp_alpha, temp_eta, samples, transition_kernel, state_action_kernel, embedding_vectors)
         improvement = old_dual_value - temp_dual_value
+
+        eval_time = time.clock() - last_time
+        last_time = time.clock()
+
+        full_eval_time += eval_time
+        full_alpha_time += alpha_time
+        full_eta_time += eta_time
 
         print(improvement, temp_eta, temp_dual_value)
         if improvement > 0.01:
@@ -377,6 +429,11 @@ def minimize_dual(initial_alpha, initial_eta, samples, transition_kernel, state_
             old_dual_value = temp_dual_value
         else:
             print("converged")
+
+        full_time = time.clock() - start_time
+        # print("--- %s percent --- eval_dual " % (round(full_eval_time / full_time, 2)))
+        # print("--- %s percent --- alpha " % (round(full_alpha_time / full_time,2)))
+        # print("--- %s percent --- eta " % (round(full_eta_time / full_time,2)))
 
     return [old_alpha, old_eta]
 
@@ -483,6 +540,9 @@ def minimize_dual_for_eta(alpha, initial_eta, samples, embedding_vectors, epsilo
 
 
 def update_step(old_policy_parameters):
+
+    last_time = time.clock()
+
     """ 1. generate roll-outs according to pi_(i-1) """
     temp_samples = None
     old_samples = None
@@ -500,28 +560,51 @@ def update_step(old_policy_parameters):
     if not old_samples is None:
         temp_samples = temp_samples + old_samples
         # TODO: Generalize
-        if np.shape(temp_samples)[0] > 150:
-            temp_samples = temp_samples[:150]
+        if np.shape(temp_samples)[0] > 1000:
+            temp_samples = temp_samples[:1000]
 
     samples = temp_samples
     print(np.shape(temp_samples)[0])
 
     number_of_samples = np.shape(samples)[0]
 
+    print("Step 1 --- %s seconds ---" % (round(time.clock() - last_time, 2)))
+    last_time = time.clock()
+
     """ 2. calculate kernel embedding strengths """
     """ 
         Which means prepare the embedding vectors [K_s*beta(s_i,a_i) - k_s(s_i)]
-        The state_action_kernel binds states to corresponding actions 
-        The transition_kernel binds states to following states (independent of actions) 
+        The state_action_kernel binds states to corresponding actions ==> pi(a|s)
+        The transition_kernel binds states to following states ==> p_pi(s,a) 
     """
+    start_step_2_time = time.clock()
+    step_2_time = start_step_2_time
+
     state_action_kernel = evaluate_state_action_kernel(samples)
+
+    state_action_time = step_2_time - time.clock()
+    step_2_time = time.clock()
+
     transition_kernel = evaluate_state_transition_kernel(samples)
+
+    transition_time = step_2_time - time.clock()
+    step_2_time = time.clock()
 
     embedding_vectors = np.zeros((number_of_samples, number_of_samples))
     for i in range(0, number_of_samples):
         sample = samples[i]
         embedding_vectors[:, i] = calculate_embedding_vector(sample[0], sample[1], samples, transition_kernel,
                                                              state_action_kernel).reshape(number_of_samples, )
+
+    embedding_time = step_2_time - time.clock()
+    step_2_time = time.clock()
+    full_step_2_time = start_step_2_time - time.clock()
+    # print("--- %s percent --- state_action_kernel" % (state_action_time / full_step_2_time))
+    # print("--- %s percent --- transition_kernel" % (transition_time / full_step_2_time))
+    # print("--- %s percent --- embedding_vectors" % (embedding_time / full_step_2_time))
+
+    print("Step 2 --- %s seconds ---" % (round(time.clock() - last_time, 2)))
+    last_time = time.clock()
 
     """ 3. minimize kernel-based dual """
 
@@ -530,6 +613,9 @@ def update_step(old_policy_parameters):
     eta = 1
     [alpha, eta] = minimize_dual(alpha, eta, samples, transition_kernel, state_action_kernel, embedding_vectors)
 
+    print("Step 3 --- %s seconds ---" % (round(time.clock() - last_time, 2)))
+    last_time = time.clock()
+
     """ 4. calculate kernel-based Bellman errors """
 
     bellman_errors = np.zeros((number_of_samples, 1))
@@ -537,16 +623,26 @@ def update_step(old_policy_parameters):
         sample = samples[i]
         bellman_errors[i] = calculate_bellman_error(sample[3], alpha, embedding_vectors[:, i])
 
+    print("Step 4 --- %s seconds ---" % (round(time.clock() - last_time, 2)))
+    last_time = time.clock()
+
     """ 5. calculate the sample weights """
 
     weights = np.zeros((number_of_samples, 1))
     weights = calculate_weights(samples, bellman_errors, eta)
+
+    print("Step 5 --- %s seconds ---" % (round(time.clock() - last_time, 2)))
+    last_time = time.clock()
 
     """ 6. fit a generalizing non-parametric policy"""
 
     space_low = None
     space_high = None
     new_policy_parameters = (alpha, eta, samples, transition_kernel, embedding_vectors)
+
+    print("Step 6 --- %s seconds ---" % (round(time.clock() - last_time, 2)))
+    last_time = time.clock()
+
     return new_policy_parameters
 
 
@@ -554,7 +650,7 @@ def main():
     converged = False
     # Parameters for a gaussian policy (mu, sigma_sq)
     policy = None
-    for i in range(0, 100):
+    for i in range(0, 50):
         # TODO: define conversion target
         policy = update_step(policy)
 
