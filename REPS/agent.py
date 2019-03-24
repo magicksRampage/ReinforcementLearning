@@ -5,18 +5,18 @@ import numpy as np
 
 class Agent:
 
-    def __init__(self):
-        self.environment = 'Pendulum-v0'
-        self.samples = self.generate_initial_episode(self.environment)
-        self.policy = self.update_step(None)
+    def __init__(self, env_name):
+        self.environment = env_name
+        self.samples = self.generate_initial_episode()
+        self.policy = None
 
     def main(self):
         converged = False
         for i in range(0, 50):
             # TODO: define conversion target
-            policy = self.update_step(policy)
+            self.policy = self.update_step()
 
-    def generate_initial_episode(self, env_name):
+    def generate_initial_episode(self):
         """
         Interacts a with an environment to produce the initial trajectory.
         If they aren't a random policy is employed.
@@ -25,7 +25,8 @@ class Agent:
         :return: an array containing the sequence of samples generated in this episode
                  (n_samples x len(samples))
         """
-        env = gym.make(env_name)
+        env = gym.make(self.environment)
+        env.seed(0)
         prev_obs = env.reset()
         new_samples = ()
         low_action = env.action_space.low[0]
@@ -43,7 +44,7 @@ class Agent:
         env.close()
         return new_samples
 
-    def update_step(self, old_policy_parameters):
+    def update_step(self, memory_size=500):
         """
         Optimize the policy according to the following steps:
         1. generate roll-outs according to pi_(i-1)
@@ -53,12 +54,7 @@ class Agent:
         5. calculate the sample weights
         6. fit a generalizing non-parametric policy
         This function contains many lines of profiling code!
-        :param old_policy_parameters: a tuple of all the policy_parameters need to "remember the previous policy"
-                                      (old_alpha,
-                                       old_eta,
-                                       old_samples,
-                                       old_transition_kernel,
-                                       old_embedding_vectors)
+        :param memory_size: the limit on the agents memory limit
         :return: the policy_parameters of the next policy
         """
         last_time = time.clock()
@@ -66,32 +62,30 @@ class Agent:
         """ 1. generate roll-outs according to pi_(i-1) """
         temp_samples = None
         old_samples = None
-        if old_policy_parameters is None:
+        if self.policy is None:
             temp_samples = self.samples
         else:
+            old_policy_parameters = self.policy
             # (alpha, eta, samples, transition_kernel, embedding_vectors)
             old_alpha = old_policy_parameters[0]
             old_eta = old_policy_parameters[1]
-            old_samples = old_policy_parameters[2]
-            old_transition_kernel = old_policy_parameters[3]
-            old_embedding_vectors = old_policy_parameters[4]
-            temp_samples = self.generate_episode(self.environment,
-                                            old_alpha,
-                                            old_eta,
-                                            old_samples,
-                                            old_transition_kernel,
-                                            old_embedding_vectors)
+            old_transition_kernel = old_policy_parameters[2]
+            old_embedding_vectors = old_policy_parameters[3]
+            temp_samples = self.generate_episode(old_alpha,
+                                                 old_eta,
+                                                 old_transition_kernel,
+                                                 old_embedding_vectors)
 
-        if not old_samples is None:
-            temp_samples = temp_samples + old_samples
+        if self.policy is not None:
+            temp_samples = temp_samples + self.samples
             # TODO: Generalize
-            if np.shape(temp_samples)[0] > 500:
-                temp_samples = temp_samples[:500]
+            if np.shape(temp_samples)[0] > memory_size:
+                temp_samples = temp_samples[:memory_size]
 
-        samples = temp_samples
+        self.samples = temp_samples
         print(np.shape(temp_samples)[0])
 
-        number_of_samples = np.shape(samples)[0]
+        number_of_samples = np.shape(self.samples)[0]
 
         print("Step 1 --- %s seconds ---" % (round(time.clock() - last_time, 2)))
         last_time = time.clock()
@@ -105,22 +99,21 @@ class Agent:
         start_step_2_time = time.clock()
         step_2_time = start_step_2_time
 
-        state_action_kernel = self.evaluate_state_action_kernel(samples)
+        state_action_kernel = self.evaluate_state_action_kernel()
 
         state_action_time = step_2_time - time.clock()
         step_2_time = time.clock()
 
-        transition_kernel = self.evaluate_state_transition_kernel(samples)
+        transition_kernel = self.evaluate_state_transition_kernel()
 
         transition_time = step_2_time - time.clock()
         step_2_time = time.clock()
 
         embedding_vectors = np.zeros((number_of_samples, number_of_samples))
         for i in range(0, number_of_samples):
-            sample = samples[i]
+            sample = self.samples[i]
             embedding_vectors[:, i] = self.calculate_embedding_vector(sample[0],
                                                                  sample[1],
-                                                                 samples,
                                                                  transition_kernel,
                                                                  state_action_kernel).reshape(number_of_samples, )
 
@@ -141,7 +134,6 @@ class Agent:
         eta = 1
         [alpha, eta] = self.minimize_dual(alpha,
                                      eta,
-                                     samples,
                                      transition_kernel,
                                      state_action_kernel,
                                      embedding_vectors)
@@ -153,7 +145,7 @@ class Agent:
 
         bellman_errors = np.zeros((number_of_samples, 1))
         for i in range(0, number_of_samples):
-            sample = samples[i]
+            sample = self.samples[i]
             bellman_errors[i] = self.calculate_bellman_error(sample[3],
                                                         alpha,
                                                         embedding_vectors[:, i])
@@ -164,7 +156,7 @@ class Agent:
         """ 5. calculate the sample weights """
 
         weights = np.zeros((number_of_samples, 1))
-        weights = self.calculate_weights(eta, samples, bellman_errors)
+        weights = self.calculate_weights(eta, bellman_errors)
 
         print("Step 5 --- %s seconds ---" % (round(time.clock() - last_time, 2)))
         last_time = time.clock()
@@ -175,7 +167,6 @@ class Agent:
         space_high = None
         new_policy_parameters = (alpha,
                                  eta,
-                                 samples,
                                  transition_kernel,
                                  embedding_vectors)
 
@@ -184,8 +175,8 @@ class Agent:
 
         return new_policy_parameters
 
-    def generate_episode(self, env_name, alpha, eta, old_samples, transition_kernel,
-                         embedding_vectors, bandwidth_matrix, l=1.0):
+    def generate_episode(self, alpha, eta, transition_kernel,
+                         embedding_vectors, bandwidth_matrix=None, l=1.0):
         """
         Interacts a with an environment to produce a trajectory.
         All parameters need to be set here.
@@ -207,28 +198,27 @@ class Agent:
         :return: an array containing the sequence of samples generated in this episode
                  (n_samples x len(samples))
         """
-        env = gym.make(env_name)
+        env = gym.make(self.environment)
+        env.seed(0)
         prev_obs = env.reset()
         new_samples = ()
         low_action = env.action_space.low[0]
         high_action = env.action_space.high[0]
         action = 0
 
-        number_of_old_samples = np.shape(old_samples)[0]
+        number_of_old_samples = np.shape(self.samples)[0]
         bandwidth_matrix = np.identity(number_of_old_samples)
         inv_reg_kernel = np.linalg.inv(np.add(transition_kernel, l * bandwidth_matrix))
 
         # weights are an estimate of the Advantage-function
         bellman_errors = np.zeros((number_of_old_samples, 1))
         for i in range(0, number_of_old_samples):
-            sample = old_samples[i]
+            sample = self.samples[i]
             bellman_errors[i] = self.calculate_bellman_error(sample[3],
                                                                 alpha,
                                                                 embedding_vectors[:, i])
 
-        advantages = self.calculate_weights(old_samples,
-                                            bellman_errors,
-                                            eta)
+        advantages = self.calculate_weights(eta, bellman_errors)
 
         for i in range(0, 100):
             action = self.gaussian_policy(prev_obs,
@@ -236,7 +226,6 @@ class Agent:
                                           high_action,
                                           alpha,
                                           eta,
-                                          old_samples,
                                           inv_reg_kernel,
                                           advantages,
                                           l)[0]
@@ -245,6 +234,7 @@ class Agent:
             new_samples += ((prev_obs, action, obs, reward),)
             prev_obs = obs
             env.render()
+            time.sleep(0.01)
 
         env.close()
         return new_samples
@@ -262,7 +252,7 @@ class Agent:
         sample = space_range * np.random.random() + space_low
         return sample
 
-    def gaussian_policy(self, state, space_low, space_high, alpha, eta, samples, inverted_kernel, advantages, l):
+    def gaussian_policy(self, state, space_low, space_high, alpha, eta, inverted_kernel, advantages, l):
         """
         Defines a kernelized policy by returning a n-dimensional action for a state given the parameters
         (the parameters contain pre-computations of the policy-evalutation)
@@ -287,12 +277,12 @@ class Agent:
         """
         # TODO: Hyperparameter D and l
 
-        number_of_samples = np.shape(samples)[0]
+        number_of_samples = np.shape(self.samples)[0]
 
         transition_vec = np.zeros((number_of_samples, 1))
         sample = None
         for i in range(0, number_of_samples):
-            sample = samples[i]
+            sample = self.samples[i]
             transition_vec[i] = self.gaussian_kernel(sample[0], state)
 
         mean = np.matmul(np.transpose(transition_vec),
@@ -335,7 +325,7 @@ class Agent:
                        space_low,
                        space_high)
 
-    def evaluate_state_action_kernel(self, samples):
+    def evaluate_state_action_kernel(self):
         """
         Evaluates a single kernelized model of which action actually occur in the for given states
         (Differs from the definition of a policy if its outcome is stochastic)
@@ -345,22 +335,22 @@ class Agent:
         :return: Matrix defining the state-action kernel
                  (n_samples x n_samples)
         """
-        number_of_samples = np.shape(samples)[0]
+        number_of_samples = np.shape(self.samples)[0]
         state_action_kernel = np.zeros((number_of_samples, number_of_samples))
         sample_i = None
         sample_j = None
         state_kval = 0.0
         action_kval = 0.0
         for i in range(0, number_of_samples):
-            sample_i = samples[i]
+            sample_i = self.samples[i]
             for j in range(0, number_of_samples):
-                sample_j = samples[j]
+                sample_j = self.samples[j]
                 state_kval = self.gaussian_kernel(sample_i[0], sample_j[0])
                 action_kval = self.gaussian_kernel(np.array([sample_i[1]]), np.array([sample_j[1]]))
                 state_action_kernel[i][j] = state_kval * action_kval
         return state_action_kernel
 
-    def evaluate_state_transition_kernel(self, samples):
+    def evaluate_state_transition_kernel(self):
         """
         Evaluated a single kernelized model of the state transition
 
@@ -369,14 +359,14 @@ class Agent:
         :return: Matrix defining the state-transition kernel
                  (n_samples x n_samples)
         """
-        number_of_samples = np.shape(samples)[0]
+        number_of_samples = np.shape(self.samples)[0]
         state_transition_kernel = np.zeros((number_of_samples, number_of_samples))
         sample_i = None
         sample_j = None
         for i in range(0, number_of_samples):
-            sample_i = samples[i]
+            sample_i = self.samples[i]
             for j in range(0, number_of_samples):
-                sample_j = samples[j]
+                sample_j = self.samples[j]
                 state_transition_kernel[i][j] = self.gaussian_kernel(sample_i[0], sample_j[2])
         return state_transition_kernel
 
@@ -404,7 +394,7 @@ class Agent:
                                       dif_vec))
         return result
 
-    def calculate_embedding_vector(self, state, action, samples, transition_kernel, state_action_kernel):
+    def calculate_embedding_vector(self, state, action, transition_kernel, state_action_kernel):
         """
         Precomputation for the bellman-error
         :param state: state for which to evaluate the embedding vector
@@ -426,17 +416,16 @@ class Agent:
 
         beta = self.calculate_beta(state,
                               action,
-                              samples,
                               state_action_kernel)
 
         beta_time = time.clock() - last_time
         last_time = time.clock()
 
-        number_of_samples = np.shape(samples)[0]
+        number_of_samples = np.shape(self.samples)[0]
         transition_vec = np.zeros((number_of_samples, 1))
         sample = None
         for i in range(0, number_of_samples):
-            transition_vec[i] = self.gaussian_kernel(samples[i][0], state)
+            transition_vec[i] = self.gaussian_kernel(self.samples[i][0], state)
 
         transition_time = time.clock() - last_time
         last_time = time.clock()
@@ -452,7 +441,7 @@ class Agent:
         # print("--- %s percent --- matrices" % (round(matrix_time / full_time, 2)))
         return embedding_vec
 
-    def calculate_beta(self, state, action, samples, state_action_kernel, l_c=-1.0):
+    def calculate_beta(self, state, action, state_action_kernel, l_c=-1.0):
         """
         Precomputation for the embedding_vectors
         :param state: state-argument for which to evaluate beta(s,a)
@@ -468,12 +457,12 @@ class Agent:
         kernel_time = 0.0
         improved_time = 0.0
 
-        number_of_samples = np.shape(samples)[0]
+        number_of_samples = np.shape(self.samples)[0]
         state_action_vec = np.zeros((number_of_samples, 1))
         sample = None
 
         for i in range(0, number_of_samples):
-            sample = samples[i]
+            sample = self.samples[i]
 
             before_kernel = time.clock()
             state_kval = self.gaussian_kernel(sample[0], state)
@@ -499,7 +488,7 @@ class Agent:
         # print("--- %s times --- faster" % (round(kernel_time / improved_time, 2)))
         return beta
 
-    def minimize_dual(self, initial_alpha, initial_eta, samples, transition_kernel, state_action_kernel, embedding_vectors,
+    def minimize_dual(self, initial_alpha, initial_eta, transition_kernel, state_action_kernel, embedding_vectors,
                       epsilon=0.5):
         """
         Minimize the lagrangian dual in a coordinate-descent-like approach.
@@ -528,7 +517,7 @@ class Agent:
         full_eta_time = 0.0
         last_time = start_time
 
-        number_of_samples = np.shape(samples)[0]
+        number_of_samples = np.shape(self.samples)[0]
 
         old_alpha = initial_alpha
         old_eta = initial_eta
@@ -537,7 +526,6 @@ class Agent:
 
         temp_dual_value = self.evaluate_dual(old_alpha,
                                         old_eta,
-                                        samples,
                                         transition_kernel,
                                         state_action_kernel,
                                         embedding_vectors)
@@ -548,15 +536,15 @@ class Agent:
         last_time = time.clock()
 
         improvement = old_dual_value - temp_dual_value
-        while improvement > 0.0:
+        number_of_improvements = 0
+        while (improvement > 0.0) & (number_of_improvements < 20):
             old_dual_value = temp_dual_value
 
             # fast unconstrained convex optimization on alpha (fixed iterations)
             temp_alpha = self.minimize_dual_for_alpha(old_alpha,
                                                  old_eta,
-                                                 samples,
                                                  embedding_vectors,
-                                                 5)
+                                                 3)
 
             alpha_time = time.clock() - last_time
             last_time = time.clock()
@@ -564,17 +552,15 @@ class Agent:
             # constrained minimization on eta (fixed iterations)
             temp_eta = self.minimize_dual_for_eta(temp_alpha,
                                              old_eta,
-                                             samples,
                                              embedding_vectors,
                                              epsilon,
-                                             5)
+                                             3)
 
             eta_time = time.clock() - last_time
             last_time = time.clock()
 
             temp_dual_value = self.evaluate_dual(temp_alpha,
                                             temp_eta,
-                                            samples,
                                             transition_kernel,
                                             state_action_kernel,
                                             embedding_vectors)
@@ -589,12 +575,14 @@ class Agent:
             full_eta_time += eta_time
 
             print(improvement, temp_eta, temp_alpha[0])
+            number_of_improvements += 1
             if improvement > 0.0:
                 old_alpha = temp_alpha
                 old_eta = temp_eta
                 old_dual_value = temp_dual_value
             else:
                 print("converged")
+
 
             full_time = time.clock() - start_time
             # print("--- %s percent --- eval_dual " % (round(full_eval_time / full_time, 2)))
@@ -603,7 +591,7 @@ class Agent:
 
         return [old_alpha, old_eta]
 
-    def evaluate_dual(self, alpha, eta, samples, transition_kernel=None, state_action_kernel=None, embedding_vectors=None,
+    def evaluate_dual(self, alpha, eta, transition_kernel=None, state_action_kernel=None, embedding_vectors=None,
                       epsilon=1.0):
         """
         Evaluates the lagrangian dual
@@ -623,7 +611,7 @@ class Agent:
         :return: the value of the dual for the given lagrangian multiplier and samples
         """
         # TODO: Check Comment for embedding_vectors dimensions
-        number_of_samples = np.shape(samples)[0]
+        number_of_samples = np.shape(self.samples)[0]
         # These might be cases we'll never need
         if transition_kernel is None:
             # TODO: If transition_kernel is not given recalculate it
@@ -641,7 +629,7 @@ class Agent:
 
         sample = None
         for i in range(0, number_of_samples):
-            sample = samples[i]
+            sample = self.samples[i]
             bellman_errors[i] = self.calculate_bellman_error(sample[3],
                                                         alpha,
                                                         embedding_vectors[:, i])
@@ -691,7 +679,7 @@ class Agent:
         return 0.0
         # return -1/eta
 
-    def minimize_dual_for_alpha(self, initial_alpha, eta, samples, embedding_vectors, number_of_iterations=10):
+    def minimize_dual_for_alpha(self, initial_alpha, eta, embedding_vectors, number_of_iterations=10):
         """
         Minimize the lagrangian dual in "direction" of alpha
         :param initial_alpha: a vector-lagrangian-parameter
@@ -706,25 +694,25 @@ class Agent:
                  (n_samples x 1)
         """
 
-        number_of_samples = np.shape(samples)[0]
+        number_of_samples = np.shape(self.samples)[0]
         alpha = initial_alpha
         # Initialize values but once
         bellman_errors = np.zeros((number_of_samples, 1))
         temp = np.zeros((number_of_samples, 1))
         weights = np.zeros((number_of_samples, 1))
         partial = np.zeros((number_of_samples, 1))
+        # Trying to improve convergance
 
         for descent in range(0, number_of_iterations):
+            old_alpha = alpha
             sample = None
             for i in range(0, number_of_samples):
-                sample = samples[i]
+                sample = self.samples[i]
                 bellman_errors[i] = self.calculate_bellman_error(sample[3],
                                                             alpha,
                                                             embedding_vectors[:, i])
 
-            weights = self.calculate_weights(eta,
-                                        samples,
-                                        bellman_errors)
+            weights = self.calculate_weights(eta, bellman_errors)
 
             partial = np.zeros((number_of_samples, 1))
             # Ignore the penalty for eta as it is constant
@@ -738,11 +726,18 @@ class Agent:
                                         bellman_errors,
                                         weights)
 
-            alpha = np.add(alpha, -partial * (1 / hessian))
+            # TODO: Improve convergence
+            # try averaging the step and a step-target in log space
+            if hessian == 0.0:
+                hessian = 1.0e-10
+            step_target = 0.5
+            step_length = np.exp(1/2 * (np.log(step_target) - np.log(hessian)))
+            alpha = np.add(alpha,
+                           -partial * step_length)
 
         return alpha
 
-    def minimize_dual_for_eta(self, alpha, initial_eta, samples, embedding_vectors, epsilon, number_of_iterations=10):
+    def minimize_dual_for_eta(self, alpha, initial_eta, embedding_vectors, epsilon, number_of_iterations=10):
         """
         Minimize the lagrangian dual in "direction" of eta.
         Be aware that an eta sufficiently close to 0 breaks the numerics! : exp(const / eta) is evaluated in the program
@@ -758,7 +753,7 @@ class Agent:
         :param number_of_iterations: number of iterations to optimize eta
         :return: the new value of eta
         """
-        number_of_samples = np.shape(samples)[0]
+        number_of_samples = np.shape(self.samples)[0]
         eta = initial_eta
         # Initialize values but once
         bellman_errors = np.zeros((number_of_samples, 1))
@@ -766,15 +761,13 @@ class Agent:
 
         sample = None
         for i in range(0, number_of_samples):
-            sample = samples[i]
+            sample = self.samples[i]
             bellman_errors[i] = self.calculate_bellman_error(sample[3],
                                                         alpha,
                                                         embedding_vectors[:, i])
 
         for descent in range(0, number_of_iterations):
-            weights = self.calculate_weights(eta,
-                                        samples,
-                                        bellman_errors)
+            weights = self.calculate_weights(eta, bellman_errors)
 
             partial = 0.0
             weight_sum = 0.0
@@ -795,7 +788,7 @@ class Agent:
                 log_sum += np.exp(np.divide(bellman_errors[i], eta) - log_regulator)
                 # Avoid crash by log(0)
                 # TODO: Find a more elegant way to avoid a crash
-                if log_sum == 0:
+                if log_sum == 0.0:
                     log_sum = 1.0e-10
 
             partial = -(1 / eta) * weight_sum + epsilon + np.log(log_sum) + log_regulator - np.log(
@@ -804,15 +797,20 @@ class Agent:
                                         embedding_vectors,
                                         bellman_errors,
                                         weights)
-            eta = eta - partial * (1 / hessian)
+            # TODO: Improve COnvergence
+            step_target = eta * 0.5
+            if hessian == 0.0:
+                hessian = 1.0e-10
+            step_length = np.exp(1/2 * (np.log(step_target) - np.log(hessian)))
+            eta = eta - partial * step_length
             # Clamp eta to be non zero
             # TODO: Could we throw a error here without using try(), catch() everywhere?
-            if eta < 0.001:
-                eta = 0.001
+            if eta < 1.0e-3:
+                eta = 1.0e-3
 
         return eta
 
-    def calculate_weights(self, eta, samples, bellman_errors):
+    def calculate_weights(self, eta, bellman_errors):
         """
         Calculate the weights for all samples
         :param eta: a scalar lagrangian-parameter
@@ -825,7 +823,7 @@ class Agent:
         """
         # TODO: Put eta in front (consistency)
 
-        number_of_samples = np.shape(samples)[0]
+        number_of_samples = np.shape(self.samples)[0]
         weights = np.zeros((number_of_samples, 1))
 
         for i in range(0, number_of_samples):
