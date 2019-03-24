@@ -5,3 +5,6 @@
 \.idea/
 --- Vim ---
 *.swp
+
+
+*/__pycache__/*
