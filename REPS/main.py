@@ -1,4 +1,4 @@
 import agent as ag
 
 my_agent = ag.Agent('Pendulum-v0')
-my_agent.main()
+my_agent.train()

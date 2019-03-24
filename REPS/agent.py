@@ -1,16 +1,29 @@
 import gym
 import time
 import numpy as np
+import model as md
+
+# hyperparameters
+INITIAL_ALPHA_SCALE = -0.1
+INITIAL_ETA = 1
+EPISODE_LENGTH = 100
+MEMORY_SIZE = 200
 
 
 class Agent:
 
     def __init__(self, env_name):
         self.environment = env_name
-        self.samples = self.generate_initial_episode()
-        self.policy = None
+        env = gym.make(self.environment)
+        self.low_action = env.action_space.low[0]
+        self.high_action = env.action_space.high[0]
+        env.close()
+        self.alpha = None
+        self.eta = None
+        self.model = None
+        self.advantages = None
 
-    def main(self):
+    def train(self):
         converged = False
         for i in range(0, 50):
             # TODO: define conversion target
@@ -29,22 +42,21 @@ class Agent:
         env.seed(0)
         prev_obs = env.reset()
         new_samples = ()
-        low_action = env.action_space.low[0]
-        high_action = env.action_space.high[0]
         action = 0
 
-        for i in range(0, 100):
-            action = self.random_policy(low_action, high_action)
+        for i in range(0, EPISODE_LENGTH):
+            action = self.random_policy(self.low_action, self.high_action)
 
             obs, reward, done, info = env.step((action,))
             new_samples += ((prev_obs, action, obs, reward),)
             prev_obs = obs
             env.render()
+            time.sleep(0.01)
 
         env.close()
         return new_samples
 
-    def update_step(self, memory_size=500):
+    def update_step(self):
         """
         Optimize the policy according to the following steps:
         1. generate roll-outs according to pi_(i-1)
@@ -60,65 +72,32 @@ class Agent:
         last_time = time.clock()
 
         """ 1. generate roll-outs according to pi_(i-1) """
-        temp_samples = None
-        old_samples = None
-        if self.policy is None:
-            temp_samples = self.samples
+        if self.model is None:
+            temp_samples = self.generate_initial_episode()
         else:
-            old_policy_parameters = self.policy
-            # (alpha, eta, samples, transition_kernel, embedding_vectors)
-            old_alpha = old_policy_parameters[0]
-            old_eta = old_policy_parameters[1]
-            old_transition_kernel = old_policy_parameters[2]
-            old_embedding_vectors = old_policy_parameters[3]
-            temp_samples = self.generate_episode(old_alpha,
-                                                 old_eta,
-                                                 old_transition_kernel,
-                                                 old_embedding_vectors)
+            temp_samples = self.generate_episode()
+            temp_samples = temp_samples + self.model.samples
+            if np.shape(temp_samples)[0] > MEMORY_SIZE:
+                temp_samples = temp_samples[:MEMORY_SIZE]
 
-        if self.policy is not None:
-            temp_samples = temp_samples + self.samples
-            # TODO: Generalize
-            if np.shape(temp_samples)[0] > memory_size:
-                temp_samples = temp_samples[:memory_size]
 
-        self.samples = temp_samples
         print(np.shape(temp_samples)[0])
-
-        number_of_samples = np.shape(self.samples)[0]
 
         print("Step 1 --- %s seconds ---" % (round(time.clock() - last_time, 2)))
         last_time = time.clock()
 
-        """ 2. calculate kernel embedding strengths """
+        """ 2. calculate Embedding """
         """ 
             Which means prepare the embedding vectors [K_s*beta(s_i,a_i) - k_s(s_i)]
             The state_action_kernel binds states to corresponding actions ==> pi(a|s)
             The transition_kernel binds states to following states ==> p_pi(s,a) 
+            Now happens in the model
         """
         start_step_2_time = time.clock()
-        step_2_time = start_step_2_time
 
-        state_action_kernel = self.evaluate_state_action_kernel()
+        self.model = md.Model(temp_samples)
+        number_of_samples = np.shape(self.model.samples)[0]
 
-        state_action_time = step_2_time - time.clock()
-        step_2_time = time.clock()
-
-        transition_kernel = self.evaluate_state_transition_kernel()
-
-        transition_time = step_2_time - time.clock()
-        step_2_time = time.clock()
-
-        embedding_vectors = np.zeros((number_of_samples, number_of_samples))
-        for i in range(0, number_of_samples):
-            sample = self.samples[i]
-            embedding_vectors[:, i] = self.calculate_embedding_vector(sample[0],
-                                                                 sample[1],
-                                                                 transition_kernel,
-                                                                 state_action_kernel).reshape(number_of_samples, )
-
-        embedding_time = step_2_time - time.clock()
-        step_2_time = time.clock()
         full_step_2_time = start_step_2_time - time.clock()
         # print("--- %s percent --- state_action_kernel" % (state_action_time / full_step_2_time))
         # print("--- %s percent --- transition_kernel" % (transition_time / full_step_2_time))
@@ -129,14 +108,16 @@ class Agent:
 
         """ 3. minimize kernel-based dual """
 
+        # Reset alpha and eta to optimize on the new embedding
+        self.alpha = np.ones((number_of_samples, 1)) * INITIAL_ALPHA_SCALE
+        self.eta = INITIAL_ETA
+
         # iterate coordinate-descent (till constraints are sufficiently fulfilled)
-        alpha = np.ones((number_of_samples, 1)) * -0.1
-        eta = 1
-        [alpha, eta] = self.minimize_dual(alpha,
-                                     eta,
-                                     transition_kernel,
-                                     state_action_kernel,
-                                     embedding_vectors)
+        [self.alpha, self.eta] = self.minimize_dual(self.alpha,
+                                          self.eta,
+                                          self.model.transition_kernel,
+                                          self.model.state_action_kernel,
+                                          self.model.embedding_vectors)
 
         print("Step 3 --- %s seconds ---" % (round(time.clock() - last_time, 2)))
         last_time = time.clock()
@@ -145,10 +126,10 @@ class Agent:
 
         bellman_errors = np.zeros((number_of_samples, 1))
         for i in range(0, number_of_samples):
-            sample = self.samples[i]
+            sample = self.model.samples[i]
             bellman_errors[i] = self.calculate_bellman_error(sample[3],
-                                                        alpha,
-                                                        embedding_vectors[:, i])
+                                                        self.alpha,
+                                                        self.model.embedding_vectors[:, i])
 
         print("Step 4 --- %s seconds ---" % (round(time.clock() - last_time, 2)))
         last_time = time.clock()
@@ -156,27 +137,22 @@ class Agent:
         """ 5. calculate the sample weights """
 
         weights = np.zeros((number_of_samples, 1))
-        weights = self.calculate_weights(eta, bellman_errors)
+        weights = self.calculate_weights(self.eta, bellman_errors)
 
         print("Step 5 --- %s seconds ---" % (round(time.clock() - last_time, 2)))
         last_time = time.clock()
 
         """ 6. fit a generalizing non-parametric policy """
 
-        space_low = None
-        space_high = None
-        new_policy_parameters = (alpha,
-                                 eta,
-                                 transition_kernel,
-                                 embedding_vectors)
+        # Policy is defined implicitly
+        self.advantages = self.calculate_weights(self.eta, bellman_errors)
 
         print("Step 6 --- %s seconds ---" % (round(time.clock() - last_time, 2)))
         last_time = time.clock()
 
-        return new_policy_parameters
+        return None
 
-    def generate_episode(self, alpha, eta, transition_kernel,
-                         embedding_vectors, bandwidth_matrix=None, l=1.0):
+    def generate_episode(self, bandwidth_matrix=None, l=1.0):
         """
         Interacts a with an environment to produce a trajectory.
         All parameters need to be set here.
@@ -202,32 +178,24 @@ class Agent:
         env.seed(0)
         prev_obs = env.reset()
         new_samples = ()
-        low_action = env.action_space.low[0]
-        high_action = env.action_space.high[0]
-        action = 0
-
-        number_of_old_samples = np.shape(self.samples)[0]
-        bandwidth_matrix = np.identity(number_of_old_samples)
-        inv_reg_kernel = np.linalg.inv(np.add(transition_kernel, l * bandwidth_matrix))
+        number_of_old_samples = np.shape(self.model.samples)[0]
 
         # weights are an estimate of the Advantage-function
         bellman_errors = np.zeros((number_of_old_samples, 1))
         for i in range(0, number_of_old_samples):
-            sample = self.samples[i]
+            sample = self.model.samples[i]
             bellman_errors[i] = self.calculate_bellman_error(sample[3],
-                                                                alpha,
-                                                                embedding_vectors[:, i])
+                                                             self.alpha,
+                                                             self.model.embedding_vectors[:, i])
 
-        advantages = self.calculate_weights(eta, bellman_errors)
-
-        for i in range(0, 100):
+        for i in range(0, EPISODE_LENGTH):
             action = self.gaussian_policy(prev_obs,
-                                          low_action,
-                                          high_action,
-                                          alpha,
-                                          eta,
-                                          inv_reg_kernel,
-                                          advantages,
+                                          self.low_action,
+                                          self.high_action,
+                                          self.alpha,
+                                          self.eta,
+                                          self.model.inv_reg_kernel,
+                                          self.advantages,
                                           l)[0]
 
             obs, reward, done, info = env.step((action,))
@@ -277,12 +245,12 @@ class Agent:
         """
         # TODO: Hyperparameter D and l
 
-        number_of_samples = np.shape(self.samples)[0]
+        number_of_samples = np.shape(self.model.samples)[0]
 
         transition_vec = np.zeros((number_of_samples, 1))
         sample = None
         for i in range(0, number_of_samples):
-            sample = self.samples[i]
+            sample = self.model.samples[i]
             transition_vec[i] = self.gaussian_kernel(sample[0], state)
 
         mean = np.matmul(np.transpose(transition_vec),
@@ -292,8 +260,10 @@ class Agent:
         variance = self.gaussian_kernel(state, state) + l - np.matmul(np.transpose(transition_vec),
                                                                  np.matmul(inverted_kernel,
                                                                            transition_vec))[0]
+
         if variance < 0:
             print("Pls check variance!")
+        # print(mean, variance)
         standard_deviation = np.sqrt(variance)
         action = self.sample_gaussian(space_low,
                                  space_high,
@@ -325,51 +295,6 @@ class Agent:
                        space_low,
                        space_high)
 
-    def evaluate_state_action_kernel(self):
-        """
-        Evaluates a single kernelized model of which action actually occur in the for given states
-        (Differs from the definition of a policy if its outcome is stochastic)
-
-        :param samples: set of state-action pairs available to calculate the state-action kernel
-                        (n_samples x len(samples))
-        :return: Matrix defining the state-action kernel
-                 (n_samples x n_samples)
-        """
-        number_of_samples = np.shape(self.samples)[0]
-        state_action_kernel = np.zeros((number_of_samples, number_of_samples))
-        sample_i = None
-        sample_j = None
-        state_kval = 0.0
-        action_kval = 0.0
-        for i in range(0, number_of_samples):
-            sample_i = self.samples[i]
-            for j in range(0, number_of_samples):
-                sample_j = self.samples[j]
-                state_kval = self.gaussian_kernel(sample_i[0], sample_j[0])
-                action_kval = self.gaussian_kernel(np.array([sample_i[1]]), np.array([sample_j[1]]))
-                state_action_kernel[i][j] = state_kval * action_kval
-        return state_action_kernel
-
-    def evaluate_state_transition_kernel(self):
-        """
-        Evaluated a single kernelized model of the state transition
-
-        :param samples: set of state-action pairs available to calculate the state-transition kernel
-                        (n_samples x len(samples))
-        :return: Matrix defining the state-transition kernel
-                 (n_samples x n_samples)
-        """
-        number_of_samples = np.shape(self.samples)[0]
-        state_transition_kernel = np.zeros((number_of_samples, number_of_samples))
-        sample_i = None
-        sample_j = None
-        for i in range(0, number_of_samples):
-            sample_i = self.samples[i]
-            for j in range(0, number_of_samples):
-                sample_j = self.samples[j]
-                state_transition_kernel[i][j] = self.gaussian_kernel(sample_i[0], sample_j[2])
-        return state_transition_kernel
-
     def gaussian_kernel(self, vec1, vec2, speed_up=False, bandwidth_matrix=None):
         """
         Defines the value of the gaussian_kernel between two vectors
@@ -381,6 +306,7 @@ class Agent:
         :return: scalar result of the kernel evaluation
         """
         # TODO: Hyperparameter D
+        result = None
         if speed_up:
             speed_up = False
             # TODO: Bring to calculation to GPU
@@ -393,100 +319,6 @@ class Agent:
                                                 bandwidth_matrix),
                                       dif_vec))
         return result
-
-    def calculate_embedding_vector(self, state, action, transition_kernel, state_action_kernel):
-        """
-        Precomputation for the bellman-error
-        :param state: state for which to evaluate the embedding vector
-                      (len(state) x 1)
-        :param action: action for which to evaluate the embedding vector
-                       (len(state) x 1)
-        :param samples: set of state-action pairs available to calculate the state-transition kernel
-                        (n_samples x len(samples))
-        :param transition_kernel: the kernelized model of the transition-distribution p(s, s')
-                                  (n_samples x n_samples)
-
-        :param state_action_kernel:the kernelized model of the action-distribution p(a|s)
-                                  (n_samples x n_samples)
-        :return: the embedding vector (s,a) needed for the bellman-error
-        """
-
-        start_time = time.clock()
-        last_time = start_time
-
-        beta = self.calculate_beta(state,
-                              action,
-                              state_action_kernel)
-
-        beta_time = time.clock() - last_time
-        last_time = time.clock()
-
-        number_of_samples = np.shape(self.samples)[0]
-        transition_vec = np.zeros((number_of_samples, 1))
-        sample = None
-        for i in range(0, number_of_samples):
-            transition_vec[i] = self.gaussian_kernel(self.samples[i][0], state)
-
-        transition_time = time.clock() - last_time
-        last_time = time.clock()
-
-        embedding_vec = np.add(np.matmul(transition_kernel,
-                                         beta),
-                               -transition_vec)
-
-        matrix_time = time.clock() - last_time
-        full_time = time.clock() - start_time
-        # print("--- %s percent --- calculate_beta" % (round(beta_time / full_time, 2)))
-        # print("--- %s percent --- transition_vec" % (round(transition_time / full_time, 2)))
-        # print("--- %s percent --- matrices" % (round(matrix_time / full_time, 2)))
-        return embedding_vec
-
-    def calculate_beta(self, state, action, state_action_kernel, l_c=-1.0):
-        """
-        Precomputation for the embedding_vectors
-        :param state: state-argument for which to evaluate beta(s,a)
-        :param action: action-argument for which to evaluate beta(s,a)
-        :param samples: the samples in the "memory" of the agent
-                        (n_samples x len(samples))
-        :param state_action_kernel:the kernelized model of the action-distribution p(a|s)
-                                  (n_samples x n_samples)
-        :param l_c: regularization coefficient
-        :return: beta(s,a)
-        """
-        start_time = time.clock()
-        kernel_time = 0.0
-        improved_time = 0.0
-
-        number_of_samples = np.shape(self.samples)[0]
-        state_action_vec = np.zeros((number_of_samples, 1))
-        sample = None
-
-        for i in range(0, number_of_samples):
-            sample = self.samples[i]
-
-            before_kernel = time.clock()
-            state_kval = self.gaussian_kernel(sample[0], state)
-            action_kval = self.gaussian_kernel(np.array([sample[1]]), np.array([action]))
-            kernel_time += time.clock() - before_kernel
-
-            """
-            ---Debugging code---
-            before_kernel = time.clock()
-            state_kval = gaussian_kernel(sample[0], state, True)
-            action_kval = gaussian_kernel(np.array([sample[1]]), np.array([action]), True)
-            improved_time += time.clock() - before_kernel
-            """
-
-            state_action_vec[i] = state_kval * action_kval
-
-        reg_mat = np.multiply(l_c, np.identity(number_of_samples))
-        beta = np.matmul(np.transpose(np.add(state_action_kernel,
-                                             reg_mat)),
-                         state_action_vec)
-
-        # print("--- %s percent --- kernel_time" % (round(kernel_time / (time.clock() - start_time), 2)))
-        # print("--- %s times --- faster" % (round(kernel_time / improved_time, 2)))
-        return beta
 
     def minimize_dual(self, initial_alpha, initial_eta, transition_kernel, state_action_kernel, embedding_vectors,
                       epsilon=0.5):
@@ -517,7 +349,7 @@ class Agent:
         full_eta_time = 0.0
         last_time = start_time
 
-        number_of_samples = np.shape(self.samples)[0]
+        number_of_samples = np.shape(self.model.samples)[0]
 
         old_alpha = initial_alpha
         old_eta = initial_eta
@@ -611,7 +443,7 @@ class Agent:
         :return: the value of the dual for the given lagrangian multiplier and samples
         """
         # TODO: Check Comment for embedding_vectors dimensions
-        number_of_samples = np.shape(self.samples)[0]
+        number_of_samples = np.shape(self.model.samples)[0]
         # These might be cases we'll never need
         if transition_kernel is None:
             # TODO: If transition_kernel is not given recalculate it
@@ -629,7 +461,7 @@ class Agent:
 
         sample = None
         for i in range(0, number_of_samples):
-            sample = self.samples[i]
+            sample = self.model.samples[i]
             bellman_errors[i] = self.calculate_bellman_error(sample[3],
                                                         alpha,
                                                         embedding_vectors[:, i])
@@ -694,7 +526,7 @@ class Agent:
                  (n_samples x 1)
         """
 
-        number_of_samples = np.shape(self.samples)[0]
+        number_of_samples = np.shape(self.model.samples)[0]
         alpha = initial_alpha
         # Initialize values but once
         bellman_errors = np.zeros((number_of_samples, 1))
@@ -707,7 +539,7 @@ class Agent:
             old_alpha = alpha
             sample = None
             for i in range(0, number_of_samples):
-                sample = self.samples[i]
+                sample = self.model.samples[i]
                 bellman_errors[i] = self.calculate_bellman_error(sample[3],
                                                             alpha,
                                                             embedding_vectors[:, i])
@@ -722,9 +554,9 @@ class Agent:
                                              embedding_vectors[:, i]).reshape((number_of_samples, 1)))
 
             hessian = self.calculate_hessian(eta,
-                                        embedding_vectors,
-                                        bellman_errors,
-                                        weights)
+                                             embedding_vectors,
+                                             bellman_errors,
+                                             weights)
 
             # TODO: Improve convergence
             # try averaging the step and a step-target in log space
@@ -753,7 +585,7 @@ class Agent:
         :param number_of_iterations: number of iterations to optimize eta
         :return: the new value of eta
         """
-        number_of_samples = np.shape(self.samples)[0]
+        number_of_samples = np.shape(self.model.samples)[0]
         eta = initial_eta
         # Initialize values but once
         bellman_errors = np.zeros((number_of_samples, 1))
@@ -761,7 +593,7 @@ class Agent:
 
         sample = None
         for i in range(0, number_of_samples):
-            sample = self.samples[i]
+            sample = self.model.samples[i]
             bellman_errors[i] = self.calculate_bellman_error(sample[3],
                                                         alpha,
                                                         embedding_vectors[:, i])
@@ -821,9 +653,8 @@ class Agent:
         :return: the weight for each samples
                  (n_samples x 1)
         """
-        # TODO: Put eta in front (consistency)
 
-        number_of_samples = np.shape(self.samples)[0]
+        number_of_samples = np.shape(self.model.samples)[0]
         weights = np.zeros((number_of_samples, 1))
 
         for i in range(0, number_of_samples):
