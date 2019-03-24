@@ -5,7 +5,10 @@ import random
 import numpy as np
 import matplotlib.pyplot as plt
 
+from quanser_robots import GentlyTerminating
+
 import features
+
 
 #global variables
 delta = 0.05
@@ -242,8 +245,7 @@ def update_value_and_policy(trajectories = None, policy = None, value = None, fe
     return [policy, newOmega, stats]
 
 def main():
-    env = gym.make('CartpoleStabShort-v0')
-#env = gym.make('Pendulum-v0')
+    env = GentlyTerminating(gym.make('CartpoleStabRR-v0'))
     policy = []
     trajectories = [] #t, s, a, r, dlp
     numobs = env.observation_space.shape[0]
