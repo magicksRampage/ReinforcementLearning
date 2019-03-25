@@ -5,7 +5,7 @@ import numpy as np
 
 class Model:
 
-    def __init__(self, initial_samples, l=1.0, bandwidth_matrix=None):
+    def __init__(self, initial_samples,l_c=2.0, l=2.0, bandwidth_matrix=None):
         self.samples = initial_samples
         self.transition_kernel = None
         self.state_action_kernel = None
@@ -15,7 +15,8 @@ class Model:
             self.bandwidth_matrix = np.identity(np.shape(self.samples)[0])
         else:
             self.bandwidth_matrix = bandwidth_matrix
-        self.l = l
+        self.transition_regulator = l
+        self.state_action_regulator = l_c
         self.setup()
 
     def setup(self):
@@ -28,7 +29,7 @@ class Model:
             self.embedding_vectors[:, i] = self.calculate_embedding_vector(sample[0], sample[1])\
                                            .reshape(number_of_samples, )
 
-        self.inv_reg_kernel = np.linalg.inv(np.add(self.transition_kernel, self.l * self.bandwidth_matrix))
+        self.inv_reg_kernel = np.linalg.inv(np.add(self.transition_kernel, self.transition_regulator * self.bandwidth_matrix))
 
 
     def evaluate_state_action_kernel(self):
@@ -92,7 +93,7 @@ class Model:
             # TODO: Bring to calculation to GPU
 
         if not speed_up:
-            dif_vec = (vec1 - vec2).astype(np.float32)
+            dif_vec = (np.array(vec1) - np.array(vec2)).astype(np.float32)
             if bandwidth_matrix is None:
                 bandwidth_matrix = np.identity(np.shape(dif_vec)[0], np.float32)
             result = np.exp(np.matmul(np.matmul(-np.transpose(dif_vec),
@@ -137,7 +138,7 @@ class Model:
         # print("--- %s percent --- matrices" % (round(matrix_time / full_time, 2)))
         return embedding_vec
 
-    def calculate_beta(self, state, action, l_c=-1.0):
+    def calculate_beta(self, state, action):
         """
         Precomputation for the embedding_vectors
         :param state: state-argument for which to evaluate beta(s,a)
@@ -171,8 +172,8 @@ class Model:
 
             state_action_vec[i] = state_kval * action_kval
 
-        reg_mat = np.multiply(l_c, np.identity(number_of_samples))
-        beta = np.matmul(np.transpose(np.add(self.state_action_kernel,
+        reg_mat = np.multiply(self.state_action_regulator, np.identity(number_of_samples))
+        beta = np.matmul(np.linalg.inv(np.add(self.state_action_kernel,
                                              reg_mat)),
                          state_action_vec)
 

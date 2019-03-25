@@ -2,9 +2,10 @@ import gym
 import time
 import numpy as np
 import model as md
+import quanser_robots
 
 # hyperparameters
-INITIAL_ALPHA_SCALE = -0.1
+INITIAL_ALPHA_SCALE = 0.1
 INITIAL_ETA = 1
 EPISODE_LENGTH = 100
 MEMORY_SIZE = 200
@@ -47,11 +48,11 @@ class Agent:
         for i in range(0, EPISODE_LENGTH):
             action = self.random_policy(self.low_action, self.high_action)
 
-            obs, reward, done, info = env.step((action,))
+            obs, reward, done, info = env.step(np.array(action))
             new_samples += ((prev_obs, action, obs, reward),)
             prev_obs = obs
             env.render()
-            time.sleep(0.01)
+            # time.sleep(0.01)
 
         env.close()
         return new_samples
@@ -79,7 +80,6 @@ class Agent:
             temp_samples = temp_samples + self.model.samples
             if np.shape(temp_samples)[0] > MEMORY_SIZE:
                 temp_samples = temp_samples[:MEMORY_SIZE]
-
 
         print(np.shape(temp_samples)[0])
 
@@ -114,10 +114,10 @@ class Agent:
 
         # iterate coordinate-descent (till constraints are sufficiently fulfilled)
         [self.alpha, self.eta] = self.minimize_dual(self.alpha,
-                                          self.eta,
-                                          self.model.transition_kernel,
-                                          self.model.state_action_kernel,
-                                          self.model.embedding_vectors)
+                                                    self.eta,
+                                                    self.model.transition_kernel,
+                                                    self.model.state_action_kernel,
+                                                    self.model.embedding_vectors)
 
         print("Step 3 --- %s seconds ---" % (round(time.clock() - last_time, 2)))
         last_time = time.clock()
@@ -128,8 +128,8 @@ class Agent:
         for i in range(0, number_of_samples):
             sample = self.model.samples[i]
             bellman_errors[i] = self.calculate_bellman_error(sample[3],
-                                                        self.alpha,
-                                                        self.model.embedding_vectors[:, i])
+                                                             self.alpha,
+                                                             self.model.embedding_vectors[:, i])
 
         print("Step 4 --- %s seconds ---" % (round(time.clock() - last_time, 2)))
         last_time = time.clock()
@@ -152,7 +152,7 @@ class Agent:
 
         return None
 
-    def generate_episode(self, bandwidth_matrix=None, l=1.0):
+    def generate_episode(self):
         """
         Interacts a with an environment to produce a trajectory.
         All parameters need to be set here.
@@ -196,13 +196,13 @@ class Agent:
                                           self.eta,
                                           self.model.inv_reg_kernel,
                                           self.advantages,
-                                          l)[0]
+                                          self.model.transition_regulator)[0]
 
-            obs, reward, done, info = env.step((action,))
+            obs, reward, done, info = env.step(np.array(action))
             new_samples += ((prev_obs, action, obs, reward),)
             prev_obs = obs
             env.render()
-            time.sleep(0.01)
+            # time.sleep(0.01)
 
         env.close()
         return new_samples
@@ -258,17 +258,18 @@ class Agent:
                                    advantages))[0]
 
         variance = self.gaussian_kernel(state, state) + l - np.matmul(np.transpose(transition_vec),
-                                                                 np.matmul(inverted_kernel,
-                                                                           transition_vec))[0]
+                                                                      np.matmul(inverted_kernel,
+                                                                                transition_vec))[0]
 
         if variance < 0:
             print("Pls check variance!")
-        # print(mean, variance)
+            variance = 0.01
+        print(mean, variance)
         standard_deviation = np.sqrt(variance)
         action = self.sample_gaussian(space_low,
-                                 space_high,
-                                 mean,
-                                 standard_deviation)
+                                      space_high,
+                                      mean,
+                                      standard_deviation)
 
         return action
 
@@ -312,7 +313,7 @@ class Agent:
             # TODO: Bring to calculation to GPU
 
         elif not speed_up:
-            dif_vec = (vec1 - vec2).astype(np.float32)
+            dif_vec = (np.array(vec1) - np.array(vec2)).astype(np.float32)
             if bandwidth_matrix is None:
                 bandwidth_matrix = np.identity(np.shape(dif_vec)[0], np.float32)
             result = np.exp(np.matmul(np.matmul(-np.transpose(dif_vec),
@@ -357,10 +358,10 @@ class Agent:
         temp_eta = None
 
         temp_dual_value = self.evaluate_dual(old_alpha,
-                                        old_eta,
-                                        transition_kernel,
-                                        state_action_kernel,
-                                        embedding_vectors)
+                                             old_eta,
+                                             transition_kernel,
+                                             state_action_kernel,
+                                             embedding_vectors)
         old_dual_value = np.inf
 
         eval_time = time.clock() - last_time
@@ -374,28 +375,28 @@ class Agent:
 
             # fast unconstrained convex optimization on alpha (fixed iterations)
             temp_alpha = self.minimize_dual_for_alpha(old_alpha,
-                                                 old_eta,
-                                                 embedding_vectors,
-                                                 3)
+                                                      old_eta,
+                                                      embedding_vectors,
+                                                      3)
 
             alpha_time = time.clock() - last_time
             last_time = time.clock()
 
             # constrained minimization on eta (fixed iterations)
             temp_eta = self.minimize_dual_for_eta(temp_alpha,
-                                             old_eta,
-                                             embedding_vectors,
-                                             epsilon,
-                                             3)
+                                                  old_eta,
+                                                  embedding_vectors,
+                                                  epsilon,
+                                                  3)
 
             eta_time = time.clock() - last_time
             last_time = time.clock()
 
             temp_dual_value = self.evaluate_dual(temp_alpha,
-                                            temp_eta,
-                                            transition_kernel,
-                                            state_action_kernel,
-                                            embedding_vectors)
+                                                 temp_eta,
+                                                 transition_kernel,
+                                                 state_action_kernel,
+                                                 embedding_vectors)
 
             improvement = old_dual_value - temp_dual_value
 
@@ -414,7 +415,6 @@ class Agent:
                 old_dual_value = temp_dual_value
             else:
                 print("converged")
-
 
             full_time = time.clock() - start_time
             # print("--- %s percent --- eval_dual " % (round(full_eval_time / full_time, 2)))
@@ -463,8 +463,8 @@ class Agent:
         for i in range(0, number_of_samples):
             sample = self.model.samples[i]
             bellman_errors[i] = self.calculate_bellman_error(sample[3],
-                                                        alpha,
-                                                        embedding_vectors[:, i])
+                                                             alpha,
+                                                             embedding_vectors[:, i])
 
         for i in range(0, number_of_samples):
             if np.divide(bellman_errors[i], eta) > log_regulator:
@@ -541,8 +541,8 @@ class Agent:
             for i in range(0, number_of_samples):
                 sample = self.model.samples[i]
                 bellman_errors[i] = self.calculate_bellman_error(sample[3],
-                                                            alpha,
-                                                            embedding_vectors[:, i])
+                                                                 alpha,
+                                                                 embedding_vectors[:, i])
 
             weights = self.calculate_weights(eta, bellman_errors)
 
@@ -563,7 +563,7 @@ class Agent:
             if hessian == 0.0:
                 hessian = 1.0e-10
             step_target = 0.5
-            step_length = np.exp(1/2 * (np.log(step_target) - np.log(hessian)))
+            step_length = np.exp(1 / 2 * (np.log(step_target) - np.log(hessian)))
             alpha = np.add(alpha,
                            -partial * step_length)
 
@@ -595,8 +595,8 @@ class Agent:
         for i in range(0, number_of_samples):
             sample = self.model.samples[i]
             bellman_errors[i] = self.calculate_bellman_error(sample[3],
-                                                        alpha,
-                                                        embedding_vectors[:, i])
+                                                             alpha,
+                                                             embedding_vectors[:, i])
 
         for descent in range(0, number_of_iterations):
             weights = self.calculate_weights(eta, bellman_errors)
@@ -626,14 +626,14 @@ class Agent:
             partial = -(1 / eta) * weight_sum + epsilon + np.log(log_sum) + log_regulator - np.log(
                 number_of_samples) + self.penalty_derivative(eta)
             hessian = self.calculate_hessian(eta,
-                                        embedding_vectors,
-                                        bellman_errors,
-                                        weights)
+                                             embedding_vectors,
+                                             bellman_errors,
+                                             weights)
             # TODO: Improve COnvergence
             step_target = eta * 0.5
             if hessian == 0.0:
                 hessian = 1.0e-10
-            step_length = np.exp(1/2 * (np.log(step_target) - np.log(hessian)))
+            step_length = np.exp(1 / 2 * (np.log(step_target) - np.log(hessian)))
             eta = eta - partial * step_length
             # Clamp eta to be non zero
             # TODO: Could we throw a error here without using try(), catch() everywhere?
@@ -704,4 +704,3 @@ class Agent:
             hessian += (1 / eta) * weights[i] * np.dot(weighted_u_vectors[i], weighted_u_vectors[i])
 
         return hessian
-
