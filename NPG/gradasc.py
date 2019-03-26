@@ -13,7 +13,7 @@ import features
 #global variables
 delta = 0.05
 discount = 0.9
-gaelambda = 0.95
+gaelambda = 0.99
 
 
 class RLstats:
@@ -141,7 +141,7 @@ def generate_trajectories(min_iterations = 10, min_samples = 10000, env = None, 
             dot = np.dot(feat, policy[:numfeat])
             mu = dot + policy[numfeat]
             action = random.gauss(mu, policy[numfeat+1])
-
+            action = np.clip(action,-6,6)
             newobs, r, done, info = env.step(np.array([action]))
             if render:
                 env.render()
@@ -245,7 +245,7 @@ def update_value_and_policy(trajectories = None, policy = None, value = None, fe
     return [policy, omega, stats]
 
 def main():
-    env = GentlyTerminating(gym.make('CartpoleStabRR-v0'))
+    env = GentlyTerminating(gym.make('CartpoleSwingRR-v0'))
     policy = []
     trajectories = [] #t, s, a, r, dlp
     numobs = env.observation_space.shape[0]
@@ -263,7 +263,7 @@ def main():
     render = True
 
     for gen in range(5000):
-        [trajectories, totalr] = generate_trajectories(env = env, min_iterations = 1, min_samples = 5000, policy = policy, feature_params = feature_params, feature_type = "linear")
+        [trajectories, totalr] = generate_trajectories(env = env, min_iterations = 1, min_samples = 2000, policy = policy, feature_params = feature_params, feature_type = "linear")
         iterations = len(trajectories)
 
         print(['Generation',gen])
@@ -275,7 +275,7 @@ def main():
 
         if avgRewards[-1] < maxReward:
             [policy, omega, stats] = update_value_and_policy(lrate = lrate, trajectories = trajectories, policy = policy, value = omega, feature_params = feature_params, feature_type = "linear")
-        if np.mod(gen,50) == 0:
+        if np.mod(gen,5) == 0:
             plt.scatter(stats.sines, stats.true_values)
             plt.scatter(stats.sines, stats.est_values)
             plt.show()   
