@@ -9,8 +9,8 @@ import features
 
 #global variables
 delta = 0.05
-discount = 0.9
-gaelambda = 0.95
+discount = 0.99
+gaelambda = 0.97
 
 
 class RLstats:
@@ -23,40 +23,6 @@ class RLstats:
     
 
 
-def getphi(I):
-    phi = []
-    for i in range(I):
-        phi.append(random.random() * 2 * math.pi - math.pi)
-    return phi
-
-
-def getP(I,J):
-    P = []
-    limits = [0.407, 1, 1, 10, 10]
-    for i in range(I):
-        Pi = []
-        for j in range(J):
-            #Pi.append(random.gauss(0,1))
-            Pi.append(2* limits[j] * random.random() - limits[j])
-        P.append(Pi)
-    return P
-    
-
-def sortByPerformance(par):
-    return par[1]
-
-def getCeil(query,l):
-    for i in range(len(l)):
-        if query < l[i][1]:
-            return l[i][0]
-    
-def copyList(l):
-    copy = []
-    for i in range(len(l)):
-        copy.append(l[i])
-    return copy
-
-
 def get_features(observations, parameters, feature_type = "linear"):
     if feature_type == "linear":
         return observations
@@ -66,6 +32,8 @@ def get_features(observations, parameters, feature_type = "linear"):
         return features.radial_basis_functions(observations, parameters)
     elif feature_type == "polynomial":
         return features.polynomial(observations, parameters)
+    elif feature_type == "2dtiles":
+        return features.tiling(observations, parameters)
     else:
         print("error: couldn't recognize feature type {}".format(feature_type))
         return observations
@@ -84,13 +52,6 @@ def linearvalue(features, params, t, T):
     featpt = np.append(features, 1)
     return np.dot(featpt, params)
 
-def initialize_feature_parameters(num_features = 0, num_observations = 0):
-    phi = getphi(num_features)
-    P = getP(num_features, num_observations)
-    v = 0.4
-    
-    return [P, v, phi]
-
 def initialize_value_function(num_features = 0):
     omega = []
     for i in range(num_features+1):
@@ -101,9 +62,9 @@ def initialize_value_function(num_features = 0):
 def initialize_policy(num_features = 0):
     policy = []
     for i in range(num_features+2):
-        policy.append(random.gauss(0,1))
-
-    policy[-1] = np.abs(1)
+        policy.append(random.gauss(0,0.1))
+    policy[1] = -20
+    policy[-1] = np.abs(3)
     return policy
 
 def generate_trajectories(min_iterations = 10, min_samples = 10000, env = None, policy = None, feature_params = None, feature_type = "linear", render_first = False):
@@ -122,6 +83,7 @@ def generate_trajectories(min_iterations = 10, min_samples = 10000, env = None, 
     miniterations = min_iterations
     trajectories = []
     totalSamples = 0
+    limits = np.array(env.observation_space.high)
     while totalSamples < min_samples or len(trajectories) < miniterations:
         traj = []
         obs = env.reset()
@@ -129,11 +91,13 @@ def generate_trajectories(min_iterations = 10, min_samples = 10000, env = None, 
         action = 0
         reward = 0
         t = 0
-        if render_first and iterations == 0:
+        if render_first and len(trajectories) == 0:
             render = True
         else:
             render = False
         while not done:
+            obs = np.array(obs) / limits
+            
             feat = get_features(obs, feature_params, feature_type)
             dot = np.dot(feat, policy[:numfeat])
             mu = dot + policy[numfeat]
@@ -234,6 +198,8 @@ def update_value_and_policy(trajectories = None, policy = None, value = None, fe
     update = np.linalg.lstsq(fisheravg,gavg)
     update = update[0]
     stepsize = math.sqrt(delta / np.dot(update, gavg)) 
+    #update = gavg
+    #stepsize = delta
     policy += stepsize * update
     policy = list(policy)
     print(['policy', policy])
@@ -242,14 +208,16 @@ def update_value_and_policy(trajectories = None, policy = None, value = None, fe
     return [policy, omega, stats]
 
 def main():
-    env = gym.make('CartpoleStabShort-v0')
+    env = gym.make('Qube-v0')
     policy = []
-    trajectories = [] #t, s, a, r, dlp
+    trajectories = [] #t, s, a, r, s', dlp
     numobs = env.observation_space.shape[0]
-    numfeat = numobs
-    maxReward = 9999
+    numfeat = 50
+    feature_type = "2dtiles"
+    render_first = True
+    maxReward = 10 ** 10
 
-    feature_params = initialize_feature_parameters(num_features = numfeat, num_observations = numobs)
+    feature_params = features.initialize_feature_parameters(num_features = numfeat, num_observations = numobs, env = env, feature_type = feature_type)
     policy = initialize_policy(num_features = numfeat)
     omega = initialize_value_function(num_features = numfeat)
 
@@ -257,10 +225,9 @@ def main():
     print(omega)
     avgRewards = []
     sigmas = np.array([])
-    render = True
 
     for gen in range(5000):
-        [trajectories, totalr] = generate_trajectories(env = env, min_iterations = 1, min_samples = 5000, policy = policy, feature_params = feature_params, feature_type = "linear")
+        [trajectories, totalr] = generate_trajectories(render_first = render_first, env = env, min_iterations = 10, min_samples = 1, policy = policy, feature_params = feature_params, feature_type = feature_type)
         iterations = len(trajectories)
 
         print(['Generation',gen])
@@ -268,10 +235,10 @@ def main():
         avgRewards.append(totalr/iterations)
         sigmas = np.append(sigmas, policy[-1])
 
-        lrate = 1.0 / (gen + 1)
+        lrate = 1.0
 
         if avgRewards[-1] < maxReward:
-            [policy, omega, stats] = update_value_and_policy(lrate = lrate, trajectories = trajectories, policy = policy, value = omega, feature_params = feature_params, feature_type = "linear")
+            [policy, omega, stats] = update_value_and_policy(lrate = lrate, trajectories = trajectories, policy = policy, value = omega, feature_params = feature_params, feature_type = feature_type)
         if np.mod(gen,50) == 0:
             plt.scatter(stats.sines, stats.true_values)
             plt.scatter(stats.sines, stats.est_values)
@@ -279,7 +246,7 @@ def main():
             plt.scatter(stats.sines, stats.actions_taken)
             plt.show()
             plt.scatter(range(len(avgRewards)), avgRewards)
-            plt.scatter(range(len(sigmas)), 1000*sigmas)
+            plt.scatter(range(len(sigmas)), sigmas)
             plt.show()
         print(['value',omega])  
 
