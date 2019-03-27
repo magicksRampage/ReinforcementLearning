@@ -21,7 +21,6 @@ class Agent:
         env.close()
         # Will be containing the values of the most recent train_step()
         self.samples = None
-        self.eta = None
         self.q_critic = None
         self.v_critic = None
         self.actor = None
@@ -44,8 +43,8 @@ class Agent:
 
         self.generate_episode()
         self.q_critic = cr.QCritic(self.samples)
-        self.v_critic = cr.VCritic(self.minimize_dual())
-        self.actor = ac.Actor(self.min_action, self.max_action, self.eta, self.samples, self.q_critic, self.v_critic)
+        self.v_critic = cr.VCritic(self.samples, self.q_critic)
+        self.actor = ac.Actor(self.min_action, self.max_action, self.samples, self.q_critic, self.v_critic)
 
     def generate_episode(self):
         env = gym.make(self.environment_name)
@@ -74,11 +73,12 @@ class Agent:
             prev_obs = obs
             env.render()
 
-        samples += (np.array(states),
-                    np.array(actions),
-                    np.array(next_states),
-                    np.array(rewards))
+        number_of_samples = np.shape(states)[0]
+        # Reshape arrays to catch shape of (n,) and replace it with (n,1)
+        samples += (np.array(np.reshape(states, (number_of_samples, -1))),
+                    np.array(np.reshape(actions, (number_of_samples, -1))),
+                    np.array(np.reshape(next_states, (number_of_samples, -1))),
+                    np.array(np.reshape(rewards, (number_of_samples, -1))))
         self.samples = samples
 
-    def minimize_dual(self):
-        return None
+
