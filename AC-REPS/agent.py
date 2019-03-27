@@ -44,7 +44,7 @@ class Agent:
         self.generate_episode()
         self.q_critic = cr.QCritic(self.samples)
         self.v_critic = cr.VCritic(self.samples, self.q_critic)
-        self.actor = ac.Actor(self.min_action, self.max_action, self.samples, self.q_critic, self.v_critic)
+        self.actor = ac.Actor(self.min_action, self.max_action, self.samples, self.q_critic, self.v_critic, self.actor)
 
     def generate_episode(self):
         env = gym.make(self.environment_name)

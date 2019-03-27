@@ -29,9 +29,9 @@ class QCritic:
                                    nn.Sigmoid())
         self.criterion = nn.MSELoss()
         self.optimizer = optim.SGD(self.model.parameters(), lr=0.01)
-        self.fit()
+        self._fit()
 
-    def fit(self):
+    def _fit(self):
         states = self.samples[0]
         actions = self.samples[1]
         next_states = self.samples[2]
@@ -88,9 +88,9 @@ class VCritic:
         self.eta = INITIAL_ETA
         # Linear Features require len(state) parameters
         self.parameters = INITIAL_PARAMETER_SCALE * np.ones((np.shape(samples[0])[1],))
-        self.minimize_dual()
+        self._minimize_dual()
 
-    def minimize_dual(self):
+    def _minimize_dual(self):
         initial_values = np.append(self.parameters, self.eta)
         constraints = ()
         for i in range(0, initial_values.size):
