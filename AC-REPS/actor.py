@@ -27,18 +27,25 @@ class Actor:
         vc = self.v_critic
         qc = self.q_critic
         weights = np.zeros((number_of_samples, 1))
+        # Numeric Regulation
         for i in range(0, number_of_samples):
             weights[i] = np.exp((qc.estimate_q(states[i], actions[i])
                                  - vc.estimate_v(states[i]))
                                 / vc.eta)
+            """
+            if np.isinf(weights[i]):
+                print("Actor-Weights broken")
+            """
         self.weights = weights
 
     def _fit(self):
-        # TODO: Use a scalar variance instead of a covariance
+        # TODO: Use a scalar variance instead of a  full covariance-matrix
         len_state = self.samples[0][0].size
-        initial_parameters = np.eye(len_state, len_state + 1)
+        initial_parameters = np.zeros(len_state + 1)
+        initial_parameters[-1] = 1
         res = minimize(self._calc_kl_distance,
                        initial_parameters,
+                       jac=False,
                        method='SLSQP',
                        options={'ftol': 1e-6, 'disp': True})
         print(res)
@@ -48,15 +55,16 @@ class Actor:
         states = self.samples[0]
         number_of_samples = np.shape(states)[0]
         len_state = states[0].size
-        parameters = np.reshape(parameters, (len_state, -1))
-        mean = parameters[:, -1]
-        covariance = parameters[:, 0:len_state]
+        mean = parameters[0:len_state]
+        covariance = parameters[-1]
         kl_distance = 0.0
         for i in range(0, number_of_samples):
             kl_distance += (1 / number_of_samples) * self.weights[i]\
                             * mvn.logpdf(states[i], mean, covariance)
+            """
             if np.isinf(kl_distance):
-                print("I call BS!")
+                print("KL-Distance broken")
+            """
         return kl_distance
 
 
