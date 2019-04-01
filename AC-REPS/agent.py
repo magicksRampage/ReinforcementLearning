@@ -59,13 +59,12 @@ class Agent:
             samples = self.samples
 
         for i in range(0, EPISODE_LENGTH):
-            if self.samples is None:
-                # Assume that no actor exists if no samples are gathered yet
+            if self.actor is None:
+                # If you haven't trained an actor explore randomly
                 action = 2.0 * (self.min_action * np.random.random()) + self.max_action
             else:
-                # Assume that an actor exists otherwise
                 action = self.actor.act()
-            obs, reward, done, info = env.step(np.array(action))
+            obs, reward, done, info = env.step(np.array([action]))
             states += (prev_obs,)
             actions += (action,)
             next_states += (obs,)

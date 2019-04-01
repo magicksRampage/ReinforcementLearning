@@ -1,4 +1,5 @@
 import numpy as np
+from scipy import optimize as opt
 from scipy.optimize import minimize
 import torch
 import torch.nn as nn
@@ -47,7 +48,7 @@ class QCritic:
         rewards = rewards.float()
         # TODO: Is the loss correct here?
         # TODO: Specify Hyperparameter (learning-rate, epoches)
-        number_of_epochs = 500
+        number_of_epochs = 50
         for epoch in range(0, number_of_epochs):
             # Forward Propagation
             predictions = self.model(model_input)
@@ -85,10 +86,18 @@ class VCritic:
     def __init__(self, samples, q_critic):
         self.samples = samples
         self.q_critic = q_critic
-        self.eta = INITIAL_ETA
-        # Linear Features require len(state) parameters
-        self.parameters = INITIAL_PARAMETER_SCALE * np.ones((np.shape(samples[0])[1],))
+        self.eta = None
+        self.parameters = None
+        self._initialize_parameters()
         self._minimize_dual()
+
+    def _initialize_parameters(self):
+        self.eta = INITIAL_ETA
+        # Polynomial n == 3
+        len_state = np.shape(self.samples[0])[1]
+        len_parameters = len_state + np.power(len_state, 2)
+        # + np.power(len_state, 3)
+        self.parameters = INITIAL_PARAMETER_SCALE * np.ones((len_parameters,))
 
     def _minimize_dual(self):
         initial_values = np.append(self.parameters, self.eta)
@@ -97,15 +106,19 @@ class VCritic:
             if i == initial_values.size-1:
                 constraints += ((0, None),)
             else:
-                constraints += ((None, None),)
+                constraints += ((-100, 100),)
+        # TODO: Find a scipy-configuration that stably minimizes the dual
         res = minimize(self._wrap_inputs,
                        initial_values,
-                       method='SLSQP',
+                       method='trust-constr',
                        bounds=constraints,
-                       options={'ftol': 1e-6, 'disp': True})
+                       jac='2-point',
+                       hess=opt.BFGS,
+                       options={'verbose': 2})
 
         self.eta = res.x[-1]
         self.parameters = res.x[0:res.x.size-1]
+        print(res)
 
     def _wrap_inputs(self, arg):
         return self.evaluate_dual(arg[-1], arg[0:arg.size-1])
@@ -121,24 +134,50 @@ class VCritic:
         states = self.samples[0]
         actions = self.samples[1]
         exp_sum = 0.0
-        running_average = 0.0
+        average_state = np.zeros(np.shape(states[0]))
         exp_regulator = 0.0
         running_max_value = -np.inf
         for i in range(0, number_of_samples):
-            exponent = ((self.q_critic.estimate_q(states[i], actions[i])- self.estimate_v(states[i])) / eta)
+            exponent = ((self.q_critic.estimate_q(states[i], actions[i]) - self.estimate_v(states[i])) / eta)
             if exponent > running_max_value:
                 running_max_value = exponent
         exp_regulator = running_max_value - 3
         for i in range(0, number_of_samples):
-            running_average += (1 / number_of_samples) * self.estimate_v(states[i], parameters)
+            average_state += (1 / number_of_samples) * states[i]
 
-            exp_sum += np.exp(((self.q_critic.estimate_q(states[i], actions[i])- self.estimate_v(states[i]))/ eta)
-                       - exp_regulator)
-        dual = EPSILON*eta + running_average + eta * (np.log(exp_sum) - np.log(number_of_samples) + exp_regulator)
+            exp_sum += np.exp(((self.q_critic.estimate_q(states[i], actions[i]) - self.estimate_v(states[i])) / eta)
+                              - exp_regulator)
+        dual = 0.0
+        dual += EPSILON*eta
+        dual += self.estimate_v(average_state, parameters)
+        dual += eta * (np.log(exp_sum) - np.log(number_of_samples) + exp_regulator)
+        # print(parameters, eta)
         return dual
 
     def estimate_v(self, state, parameters=None):
         if parameters is None:
             parameters = self.parameters
-        # Linear Features for the moment
-        return np.dot(parameters, state)
+        # Establish basis-functions-evaluations
+        basis_evaluations = ()
+        # In this case polonomiyal features of degree 3
+        len_state = state.size
+        # n == 1
+        for i in range(0, len_state):
+            basis_evaluations += (state[i],)
+        # n == 2
+        for i in range(0, len_state):
+            for j in range(0, len_state):
+                basis_evaluations += (state[i]*state[j],)
+        """
+        # n == 3
+        for i in range(0, len_state):
+            for j in range(0, len_state):
+                for k in range(0, len_state):
+                    basis_evaluations += (state[i]*state[j]*state[k],)
+        """
+
+        """
+        if not parameters[0] == 0:
+            print("Stop")
+        """
+        return np.dot(parameters, np.array(basis_evaluations))
