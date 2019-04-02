@@ -26,10 +26,14 @@ class QCritic:
         # Init Neural Network
         self.model = nn.Sequential(nn.Linear(self.n_in, self.n_h),
                                    nn.ReLU(),
-                                   nn.Linear(self.n_h, self.n_out),
-                                   nn.Sigmoid())
+                                   nn.Linear(self.n_h, self.n_h),
+                                   nn.ReLU(),
+                                   nn.Linear(self.n_h, self.n_h),
+                                   nn.ReLU(),
+                                   nn.Linear(self.n_h, self.n_out))
         self.criterion = nn.MSELoss()
-        self.optimizer = optim.SGD(self.model.parameters(), lr=0.01)
+        # TODO: Hyper-parameter: learning_rate
+        self.optimizer = optim.Adam(self.model.parameters(), lr=1e-4)
         self._fit()
 
     def _fit(self):
@@ -46,32 +50,52 @@ class QCritic:
         # Switch to float because the NN demands it ?.?
         model_input = model_input.float()
         rewards = rewards.float()
-        # TODO: Is the loss correct here?
+        # TODO: Is the target correct here?
         # TODO: Specify Hyperparameter (learning-rate, epoches)
-        number_of_epochs = 50
-        for epoch in range(0, number_of_epochs):
+        # number_of_epochs = 500
+        # for epoch in range(0, number_of_epochs):
+        loss = np.inf
+        epoch = 0
+        # TODO: Hyper-parameter: loss_threshhold
+        loss_threshold = 1e-2
+        # TODO: Safety: max_epoches
+        while (loss > loss_threshold) & (epoch < 2000):
             # Forward Propagation
             predictions = self.model(model_input)
+            number_of_predictions = predictions.size()[0]
+            average_prediction = 0.0
+            average_reward = 0.0
+            for i in range(0, number_of_predictions):
+                average_prediction += (1/number_of_predictions) * predictions[i]
+                average_reward += (1/number_of_predictions) * rewards[i]
 
+            # Define the Td-Q-Targets arcording to n-look-ahead in the sampels
             target = rewards.clone()
-            target[0:target.size()[0] - 1] += DECAY * predictions[1:]
+            td_range = 1
+            for td_step in range(1, 1+td_range):
+                if td_step == td_range:
+                    target[0:target.size()[0] - td_step] += np.power(DECAY, td_step) * predictions[td_step:]
+                    target[target.size()[0] - td_step:] += np.power(DECAY, i) * average_prediction * torch.ones((td_step, 1))
+                else:
+                    target[0:target.size()[0] - td_step] += np.power(DECAY, td_step) * rewards[td_step:]
+                    target[target.size()[0] - td_step:] += np.power(DECAY, i) * average_reward * torch.ones((td_step, 1))
             # Compute and print loss
             loss = self.criterion(predictions, target)
-            print('epoch: ', epoch, ' loss: ', loss.item())
+            epoch += 1
+            print('epoch: ', epoch, ' loss: ', loss.item(), ' Average Prediction: ', average_prediction)
 
             # Zero the gradients
             self.optimizer.zero_grad()
 
             # perform a backward pass (backpropagation)
-            if epoch == (number_of_epochs - 1):
+            # if epoch == (number_of_epochs - 1):
+            if (loss < loss_threshold) | (epoch == 2000):
                 loss.backward()
             else:
                 loss.backward(retain_graph=True)
 
             # Update the parameters
             self.optimizer.step()
-
-        self.estimate_q(states[0], actions[0])
 
     def estimate_q(self, state, action):
         input = torch.from_numpy(np.reshape(np.append(state, action), (1, -1)))
@@ -93,7 +117,7 @@ class VCritic:
 
     def _initialize_parameters(self):
         self.eta = INITIAL_ETA
-        # Polynomial n == 3
+        # Polynomial n == 2
         len_state = np.shape(self.samples[0])[1]
         len_parameters = len_state + np.power(len_state, 2)
         # + np.power(len_state, 3)
@@ -106,15 +130,13 @@ class VCritic:
             if i == initial_values.size-1:
                 constraints += ((0, None),)
             else:
-                constraints += ((-100, 100),)
+                constraints += ((None, None),)
         # TODO: Find a scipy-configuration that stably minimizes the dual
         res = minimize(self._wrap_inputs,
                        initial_values,
-                       method='trust-constr',
+                       method='SLSQP',
                        bounds=constraints,
-                       jac='2-point',
-                       hess=opt.BFGS,
-                       options={'verbose': 2})
+                       options={'disp': True})
 
         self.eta = res.x[-1]
         self.parameters = res.x[0:res.x.size-1]
@@ -141,7 +163,7 @@ class VCritic:
             exponent = ((self.q_critic.estimate_q(states[i], actions[i]) - self.estimate_v(states[i])) / eta)
             if exponent > running_max_value:
                 running_max_value = exponent
-        exp_regulator = running_max_value - 3
+        exp_regulator = running_max_value + np.log(number_of_samples)
         for i in range(0, number_of_samples):
             average_state += (1 / number_of_samples) * states[i]
 
@@ -159,7 +181,7 @@ class VCritic:
             parameters = self.parameters
         # Establish basis-functions-evaluations
         basis_evaluations = ()
-        # In this case polonomiyal features of degree 3
+        # In this case polynomial features of degree 2
         len_state = state.size
         # n == 1
         for i in range(0, len_state):
