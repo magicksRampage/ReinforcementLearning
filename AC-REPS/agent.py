@@ -2,12 +2,13 @@ import gym
 import time
 import numpy as np
 import actor as ac
-import critic as cr
+import predictor
+import minimizer
 import quanser_robots
 
 
 INITIAL_ETA = 1
-EPISODE_LENGTH = 100
+EPISODE_LENGTH = 200
 MEMORY_SIZE = 500
 
 
@@ -42,8 +43,10 @@ class Agent:
         """
 
         self.generate_episode()
-        self.q_critic = cr.QCritic(self.samples)
-        self.v_critic = cr.VCritic(self.samples, self.q_critic)
+        self.q_critic = predictor.QCritic(self.samples)
+        print("Q-Critic fitted")
+        self.v_critic = minimizer.VCritic(self.samples, self.q_critic)
+        print("V-Critic minimized dual")
         self.actor = ac.Actor(self.min_action, self.max_action, self.samples, self.q_critic, self.v_critic, self.actor)
 
     def generate_episode(self):
