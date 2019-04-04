@@ -5,7 +5,8 @@ import matplotlib.pyplot as plt
 
 def fourier(o, P, v, phi):
     y = []
-    for i in range(numfeat - len(y)):
+    numfeat = len(phi)
+    for i in range(numfeat):
         arg = 0
         for j in range(len(o)):
             arg += P[i][j] * o[j]
@@ -16,13 +17,17 @@ def fourier(o, P, v, phi):
 
 def radial_basis_functions(o, p):
     rbf = []
-    P = p[0]
-    sigma = p[2]
+    P = np.array(p[0])
+    sigma = np.array(p[2])
+    obs = np.array(o)
+    args = np.square(P - obs) / sigma
+    args = np.dot(args, np.ones(len(obs)))
+    rbf = np.exp(-args)
+    return rbf
     for i in range(len(P)):
         arg = 0
         for j in range(len(o)):
-            if P[i][j] != 0:
-                arg += np.square(P[i][j] - o[j]) / sigma[j]
+            arg += np.square(P[i][j] - o[j]) / sigma[j]
         rbf.append(np.exp(-arg))
     return np.array(rbf)
 
@@ -57,7 +62,7 @@ def getphi(I,env):
     phi = []
     #limits = env.observation_space.high
     #return np.array(limits) * 2
-    return np.ones([I])
+    #return np.ones([I])
     for i in range(I):
         phi.append(random.random() * 2 * math.pi - math.pi)
     return phi
@@ -69,7 +74,7 @@ def getP(I,J,env):
     for i in range(I):
         Pi = []
         for j in range(J):
-            if random.random() < 0.34:
+            if random.random() < 1:
                 Pi.append(2 * random.random() - 1)
             else:
                 Pi.append(0)
@@ -101,12 +106,15 @@ def getP_polynomial(numobs, degree):
     return P
 
 def getP_2dtiles(numfeat, numobs):
-    P = np.zeros([numfeat, numobs])
+    P = np.zeros([numfeat, 6])
     for feat in range(numfeat):
         for i in range(2):
             obs = random.choice(range(numobs))
             a = 2 * random.random() - 1
-            b = 2 * random.random() - 1
+            if random.random() < 0.5:
+                b = a + 0.4
+            else:
+                b = a - 0.4
             upper = max(a,b)
             lower = min(a,b)
             P[feat][i*3] = obs
@@ -116,15 +124,17 @@ def getP_2dtiles(numfeat, numobs):
     return P
         
 
-def initialize_feature_parameters(num_features = 0, num_observations = 0, env = None, feature_type = "linear"):
+def initialize_feature_parameters(num_features = 0, num_observations = 0, env = None, feature_type = "linear", sigma = 1):
     if feature_type == "linear":
         return
     elif feature_type == "polynomial":
         return [getP_polynomial(num_observations, num_features), 0, []]
     elif feature_type == "2dtiles":
         return [getP_2dtiles(num_features, num_observations), 0 , []]
+    elif feature_type == "rbf":
+        return [getP(num_features, num_observations, env = env), 0, sigma * np.ones(num_observations)]
     else:
-        phi = getphi(num_observations, env = env)
+        phi = getphi(num_features, env = env)
         P = getP(num_features, num_observations, env = env)
         v = 1
         return [P, v, phi]
