@@ -6,7 +6,7 @@ import torch.nn as nn
 import torch.optim as optim
 
 # TODO: Handle Hyperparameters correctly
-DECAY = 0.9
+DECAY = 0.98
 
 
 class QCritic:
@@ -30,7 +30,7 @@ class QCritic:
                                    nn.Linear(self.n_h, self.n_out))
         self.criterion = nn.MSELoss()
         # TODO: Hyper-parameter: learning_rate
-        self.optimizer = optim.Adam(self.model.parameters(), lr=10e-4)
+        self.optimizer = optim.Adam(self.model.parameters(), lr=1e-3)
         self._fit()
 
     def _fit(self):
@@ -56,7 +56,7 @@ class QCritic:
         # TODO: Hyper-parameter: loss_threshhold
         loss_threshold = 5e-2
         # TODO: Safety: max_epoches
-        while (loss > loss_threshold) & (epoch < 1000):
+        while (loss > loss_threshold) & (epoch < 100):
             # Forward Propagation
             predictions = self.model(model_input)
             number_of_predictions = predictions.size()[0]
@@ -79,7 +79,7 @@ class QCritic:
             # Compute and print loss
             loss = self.criterion(predictions, target)
             epoch += 1
-            print('epoch: ', epoch, ' loss: ', loss.item(), ' Average Prediction: ', average_prediction)
+            # print('epoch: ', epoch, ' loss: ', loss.item(), ' Average Prediction: ', average_prediction)
 
             # Zero the gradients
             self.optimizer.zero_grad()
@@ -93,6 +93,8 @@ class QCritic:
 
             # Update the parameters
             self.optimizer.step()
+        # print([predictions, rewards])
+        # print(number_of_predictions)
 
     def estimate_q(self, state, action):
         input = torch.from_numpy(np.reshape(np.append(state, action), (1, -1)))

@@ -11,13 +11,16 @@ INITIAL_PARAMETER_SCALE = 0.0
 
 class VCritic:
 
-    def __init__(self, samples, q_critic):
+    def __init__(self, min_action, max_action, samples, q_critic):
+        self.min_action = min_action
+        self.max_action = max_action
         self.samples = samples
         self.q_critic = q_critic
         self.eta = INITIAL_ETA
-        self.model = model.Model(model.RBF,
+        self.model = model.Model(model.RANDOM_RBFS,
                                  np.shape(self.samples[0][0])[0],
-                                 number_of_basis_functions=15)
+                                 min_in=self.min_action,
+                                 max_in=self.max_action)
         """
         self.parameters = None
         self._initialize_parameters()

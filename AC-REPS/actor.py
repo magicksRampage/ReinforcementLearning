@@ -67,8 +67,6 @@ class Actor:
             """
         return kl_distance
 
-
-
-
     def act(self):
+        # TODO: Implement
         return None

@@ -45,7 +45,7 @@ class Agent:
         self.generate_episode()
         self.q_critic = predictor.QCritic(self.samples)
         print("Q-Critic fitted")
-        self.v_critic = minimizer.VCritic(self.samples, self.q_critic)
+        self.v_critic = minimizer.VCritic(self.min_action, self.max_action, self.samples, self.q_critic)
         print("V-Critic minimized dual")
         self.actor = ac.Actor(self.min_action, self.max_action, self.samples, self.q_critic, self.v_critic, self.actor)
 
