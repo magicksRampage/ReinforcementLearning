@@ -53,8 +53,8 @@ class QCritic:
         # for epoch in range(0, number_of_epochs):
         loss = np.inf
         epoch = 0
-        # TODO: Hyper-parameter: loss_threshhold
-        loss_threshold = 1e-8
+        # TODO: Hyper-parameter: loss_threshold
+        loss_threshold = 1e-10
         # TODO: Safety: max_epoches
         while (loss > loss_threshold) & (epoch < 5000):
             # Forward Propagation

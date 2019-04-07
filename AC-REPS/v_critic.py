@@ -16,7 +16,7 @@ class VCritic:
         self.samples = samples
         self.q_critic = q_critic
         self.eta = INITIAL_ETA
-        self.model = model.Model(model.POLYNOMIAL_QUADRATIC,
+        self.model = model.Model(model.POLYNOMIAL_LINEAR,
                                  np.shape(self.samples[0][0])[0])
         self._minimize_dual()
 
@@ -37,8 +37,8 @@ class VCritic:
                        method='SLSQP',
                        bounds=constraints,
                        options={'disp': True})
+        self.model.parameters = res.x[0:res.x.size-1]
         self.eta = res.x[-1]
-        self.parameters = res.x[0:res.x.size-1]
         print(res)
         print("Fitting V_Critic_Time: ", time.clock() - prev_time)
 

@@ -6,6 +6,8 @@ Functions
 - act : returns an action given a state
 """
 import numpy as np
+import model
+import time
 from scipy.optimize import minimize
 from scipy.stats import multivariate_normal as mvn
 
@@ -27,9 +29,8 @@ class Actor:
         self.old_actor = old_actor
         self.weights = None
         self._calculate_weights()
-        # Parameters of the multivariate Gaussian
-        self.mean = None
-        self.var = None
+        self.model = model.Model(model.RANDOM_RBFS,
+                                 np.shape(self.samples[0][0])[0])
         self._fit()
 
     def _calculate_weights(self):
@@ -49,37 +50,34 @@ class Actor:
         self.weights = weights
 
     def _fit(self):
-        len_state = self.samples[0][0].size
-        initial_parameters = np.zeros(len_state + 1)
-        initial_parameters[-1] = 1
+        print("Handing of work to scipy")
+        prev_time = time.clock()
+        initial_values = self.model.parameters
         constraints = ()
-        for i in range(0, initial_parameters.size):
-            if i == initial_parameters.size-1:
-                constraints += ((0, None),)
-            else:
-                constraints += ((None, None),)
+        for i in range(0, initial_values.size):
+            constraints += ((0, None),)
         res = minimize(self._calc_kl_distance,
-                       initial_parameters,
+                       initial_values,
                        jac=False,
                        method='SLSQP',
+                       bounds=constraints,
                        options={'ftol': 1e-6, 'disp': True})
+        self.model.parameters = res.x
         print(res)
-        self.mean = res.x[:np.size(res.x)-1]
-        self.var = res.x[-1]
+        print("Fitting Actor_Time: ", time.clock() - prev_time)
 
     def _calc_kl_distance(self, parameters):
+        self.model.parameters = parameters
         states = self.samples[0]
         number_of_samples = np.shape(states)[0]
-        len_state = states[0].size
-        mean = parameters[0:len_state]
-        covariance = parameters[-1]
-        print(covariance)
         kl_distance = 0.0
         for i in range(0, number_of_samples):
+            if self.model.evaluate(states[i]) <= 0.0:
+                print("model unfit for optimizing over kl-distance")
             kl_distance += (1 / number_of_samples) * self.weights[i]\
-                            * mvn.logpdf(states[i], mean, covariance)
+                            * np.log(self.model.evaluate(states[i]))
         return kl_distance
 
     def act(self, state):
-        act = mvn.pdf(state, self.mean, self.var)
+        act = self.model.evaluate(state)
         return act
