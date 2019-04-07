@@ -12,17 +12,13 @@ RANDOM_RBFS = 'random_gaussians'
 
 class Model:
 
-    def __init__(self, model_name, len_in, len_out=1, number_of_basis_functions=None, min_in=None, max_in=None):
+    def __init__(self, model_name, len_in, len_out=1, number_of_basis_functions=None):
         self.model_name = model_name
         self.len_in = len_in
         self.len_out = len_out
         self.number_of_parameters = None
         self.number_of_inner_parameters = None
         self.number_of_basis_functions = number_of_basis_functions
-        # TODO: This gets handed max_actions atm
-        # TODO: Remove hard-coding
-        self.min_in = -1
-        self.max_in = 1
 
         if self.model_name == POLYNOMIAL_LINEAR:
             if self.number_of_basis_functions is not None:
@@ -43,6 +39,7 @@ class Model:
             self.number_of_basis_functions = self.number_of_parameters
 
         elif self.model_name == RANDOM_RBFS:
+            print("RBFS are many times (~ 10-100x) slower than polynomial basis-functions!")
             if self.number_of_basis_functions is None:
                 print("No number of basis_functions has been chosen for RBFS.")
                 print("The model will try to evenly tile the input-space.")
@@ -51,8 +48,6 @@ class Model:
                 self.number_of_parameters = np.power(2, self.len_in) + 1
             else:
                 self.number_of_parameters = self.number_of_basis_functions
-            if (self.min_in is None) | (self.max_in is None):
-                print("RANDOM_RBFS need a specified range of possible outputs")
             # Inner parameters contain multivariate mean
             self.number_of_inner_parameters = len_in * self.number_of_parameters
 
@@ -66,23 +61,25 @@ class Model:
         # Let every basis function influence the outcome at first
         if self.model_name == RANDOM_RBFS:
             self.inner_parameters = np.zeros((self.number_of_inner_parameters, 1))
-            input_range = self.max_in - self.min_in
             if self.number_of_basis_functions is None:
+                # Place Gaussians on the corners of the space
                 for i in itertools.product([0, 1], repeat=self.len_in):
                     means_processed = 0.0
                     for j in range(0, self.len_in):
                         means_processed += i[j] * np.power(2, self.len_in - (j+1))
                     for j in range(0, self.len_in):
-                        self.inner_parameters[int(means_processed * self.len_in + j)] = i[j] * input_range + self.min_in
+                        self.inner_parameters[int(means_processed * self.len_in + j)] = i[j]
+                # Place one wider gaussian over the center of the space
+                for i in range(0, self.len_in):
+                    self.inner_parameters[-(i+1)] = 0.5
             else:
                 for i in range(0, self.number_of_parameters):
                     for j in range(0, self.len_in):
-                        self.inner_parameters[i * self.len_in + j] = np.random.random() * input_range + self.min_in
+                        self.inner_parameters[i * self.len_in + j] = np.random.random()
         # Let every basis function influence the outcome at first
         self.parameters = np.ones((self.number_of_parameters, 1))
 
     def evaluate(self, args):
-        start_time = time.clock()
         evaluated_basis_functions = np.zeros(np.shape(self.parameters))
         if self.model_name == POLYNOMIAL_LINEAR:
             for i in range(0, self.len_in):
@@ -102,25 +99,18 @@ class Model:
         elif self.model_name == RANDOM_RBFS:
             # Calculate variance so that RBFS should cover most of the space
             # Assume a gaussian is mostly relevant inside of one standard-deviation
-            # Look at the size equidistributed cubes would need to have to fill the action space
-            input_range = self.max_in - self.min_in
+            # Look at the size equidistributed cubes would need to have to fill the action
             dim = self.len_in
             if self.number_of_basis_functions is None:
                 n = self.number_of_parameters - 1
             else:
                 n = self.number_of_basis_functions
-            # var = np.log(np.power(input_range, dim) / n) / np.log(dim)
-            # TODO: Remove hard-coding
-            var = 1
-            # Respect the n-dimensional-cube-sphere-ratio
-            volume_ratio = special.gamma((dim / 2) + 1) * np.power(2, dim) / np.power(np.pi, dim / 2)
-            var = var * np.log(volume_ratio)/np.log(dim)
+            # Interpret the space under one sigma as the relevant support for a gaussian
+            # Now adjust the support that each gaussian "covers one corner of your space"
+            var = np.sqrt(dim) * (1 / 2)
             for i in range(0, n):
-                # for the guassian in the middle increase variance
-                if (self.number_of_basis_functions is None) & (i == np.power(2, dim)):
-                    var = np.sqrt(dim) * (input_range / 2)
                 myu = self.inner_parameters[i*dim:(i+1)*dim]
-                # This call takes up >90% of the function-time and makes RBFS really slow
+                # This call takes up >90% of the eval_function-time and makes RBFS really slow
                 evaluated_basis_functions[i] = stats.multivariate_normal(mean=np.reshape(myu, (-1,)), cov=var).pdf(args)
 
         if self.model_name == RANDOM_RBFS:

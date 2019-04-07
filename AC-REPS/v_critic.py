@@ -12,20 +12,12 @@ INITIAL_PARAMETER_SCALE = 0.0
 
 class VCritic:
 
-    def __init__(self, min_action, max_action, samples, q_critic):
-        self.min_action = min_action
-        self.max_action = max_action
+    def __init__(self, samples, q_critic):
         self.samples = samples
         self.q_critic = q_critic
         self.eta = INITIAL_ETA
-        self.model = model.Model(model.POLYNOMIAL_CUBIC,
-                                 np.shape(self.samples[0][0])[0],
-                                 min_in=self.min_action,
-                                 max_in=self.max_action)
-        """
-        self.parameters = None
-        self._initialize_parameters()
-        """
+        self.model = model.Model(model.POLYNOMIAL_QUADRATIC,
+                                 np.shape(self.samples[0][0])[0])
         self._minimize_dual()
 
     def _minimize_dual(self):
@@ -48,7 +40,7 @@ class VCritic:
         self.eta = res.x[-1]
         self.parameters = res.x[0:res.x.size-1]
         print(res)
-        print("Time: ", time.clock() - prev_time)
+        print("Fitting V_Critic_Time: ", time.clock() - prev_time)
 
     def _wrap_inputs(self, arg):
         return self.evaluate_dual(arg[-1], arg[0:arg.size-1])
