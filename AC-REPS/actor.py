@@ -1,3 +1,10 @@
+"""
+Simple class determining and defining a policy.
+
+Functions
+---------
+- act : returns an action given a state
+"""
 import numpy as np
 from scipy.optimize import minimize
 from scipy.stats import multivariate_normal as mvn
@@ -6,6 +13,15 @@ from scipy.stats import multivariate_normal as mvn
 class Actor:
 
     def __init__(self, min_action, max_action, samples, q_critic, v_critic, old_actor):
+        """
+
+        :param min_action: Defines the minimal value of an action the actor is allowed to take in the environment
+        :param max_action: Defines the maximal value of an action the actor is allowed to take in the environment
+        :param samples: The observations of the last roll-out containing (states, actions, following_states, rewards)
+        :param q_critic: The object estimating the Q-Function
+        :param v_critic: The object estimating the V-Function
+        :param old_actor: The object defining the previous policy
+        """
         self.min_action = min_action
         self.max_action = max_action
         self.samples = samples
@@ -43,6 +59,12 @@ class Actor:
         len_state = self.samples[0][0].size
         initial_parameters = np.zeros(len_state + 1)
         initial_parameters[-1] = 1
+        constraints = ()
+        for i in range(0, initial_parameters.size):
+            if i == initial_parameters.size-1:
+                constraints += ((0, None),)
+            else:
+                constraints += ((None, None),)
         res = minimize(self._calc_kl_distance,
                        initial_parameters,
                        jac=False,

@@ -1,5 +1,6 @@
 import numpy as np
 import model
+import time
 from scipy import optimize as opt
 from scipy.optimize import minimize
 
@@ -17,7 +18,7 @@ class VCritic:
         self.samples = samples
         self.q_critic = q_critic
         self.eta = INITIAL_ETA
-        self.model = model.Model(model.RANDOM_RBFS,
+        self.model = model.Model(model.POLYNOMIAL_CUBIC,
                                  np.shape(self.samples[0][0])[0],
                                  min_in=self.min_action,
                                  max_in=self.max_action)
@@ -26,15 +27,6 @@ class VCritic:
         self._initialize_parameters()
         """
         self._minimize_dual()
-
-    """
-    def _initialize_parameters(self):
-        # Polynomial n == 2
-        len_state = np.shape(self.samples[0])[1]
-        len_parameters = len_state + np.power(len_state, 2)
-        # + np.power(len_state, 3)
-        self.parameters = INITIAL_PARAMETER_SCALE * np.ones((len_parameters,))
-    """
 
     def _minimize_dual(self):
         print("Minimizing Dual")
@@ -47,15 +39,16 @@ class VCritic:
                 constraints += ((None, None),)
         # TODO: Find a scipy-configuration that stably minimizes the dual
         print("Handing of work to scipy")
+        prev_time = time.clock()
         res = minimize(self._wrap_inputs,
                        initial_values,
                        method='SLSQP',
                        bounds=constraints,
                        options={'disp': True})
-
         self.eta = res.x[-1]
         self.parameters = res.x[0:res.x.size-1]
         print(res)
+        print("Time: ", time.clock() - prev_time)
 
     def _wrap_inputs(self, arg):
         return self.evaluate_dual(arg[-1], arg[0:arg.size-1])

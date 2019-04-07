@@ -1,4 +1,5 @@
 import numpy as np
+import time
 import itertools
 import scipy.stats as stats
 import scipy.special as special
@@ -63,8 +64,8 @@ class Model:
 
     def _initialize_parameters(self):
         # Let every basis function influence the outcome at first
-        self.inner_parameters = np.zeros((self.number_of_inner_parameters, 1))
         if self.model_name == RANDOM_RBFS:
+            self.inner_parameters = np.zeros((self.number_of_inner_parameters, 1))
             input_range = self.max_in - self.min_in
             if self.number_of_basis_functions is None:
                 for i in itertools.product([0, 1], repeat=self.len_in):
@@ -81,6 +82,7 @@ class Model:
         self.parameters = np.ones((self.number_of_parameters, 1))
 
     def evaluate(self, args):
+        start_time = time.clock()
         evaluated_basis_functions = np.zeros(np.shape(self.parameters))
         if self.model_name == POLYNOMIAL_LINEAR:
             for i in range(0, self.len_in):
@@ -118,6 +120,7 @@ class Model:
                 if (self.number_of_basis_functions is None) & (i == np.power(2, dim)):
                     var = np.sqrt(dim) * (input_range / 2)
                 myu = self.inner_parameters[i*dim:(i+1)*dim]
+                # This call takes up >90% of the function-time and makes RBFS really slow
                 evaluated_basis_functions[i] = stats.multivariate_normal(mean=np.reshape(myu, (-1,)), cov=var).pdf(args)
 
         if self.model_name == RANDOM_RBFS:
