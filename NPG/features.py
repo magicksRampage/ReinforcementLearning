@@ -2,6 +2,7 @@ import math
 import random
 import numpy as np
 import matplotlib.pyplot as plt
+import itertools
 
 def fourier(o, P, v, phi):
     y = []
@@ -123,8 +124,16 @@ def getP_2dtiles(numfeat, numobs):
 
     return P
         
+def getP_rbf(numobs, grain = 3):
+    elements = []
+    for i in range(grain):
+        elements.append(-1 + i* (2.0 / (grain - 1)))
 
-def initialize_feature_parameters(num_features = 0, num_observations = 0, env = None, feature_type = "linear", sigma = 1):
+    product = itertools.product(elements, repeat = numobs)
+    P = list(product)
+    return np.array(P)
+
+def initialize_feature_parameters(num_features = 0, num_observations = 0, env = None, feature_type = "linear", sigma = 1, random = False):
     if feature_type == "linear":
         return
     elif feature_type == "polynomial":
@@ -132,7 +141,10 @@ def initialize_feature_parameters(num_features = 0, num_observations = 0, env = 
     elif feature_type == "2dtiles":
         return [getP_2dtiles(num_features, num_observations), 0 , []]
     elif feature_type == "rbf":
-        return [getP(num_features, num_observations, env = env), 0, sigma * np.ones(num_observations)]
+        if not random:
+            return [getP_rbf(num_observations), 0, sigma * np.ones(num_observations)]
+        else:
+            return [getP(num_features, num_observations, env = env), 0, sigma * np.ones(num_observations)]
     else:
         phi = getphi(num_features, env = env)
         P = getP(num_features, num_observations, env = env)

@@ -11,7 +11,7 @@ import features
 #global variables
 delta = 0.05
 discount = 0.99
-gaelambda = 0.97
+gaelambda = 0.95
 
 
 class RLstats:
@@ -77,10 +77,10 @@ def derivative(act, feat, pol, mu):
     deriv = []
     sigma = pol[-1]
     for i in range(len(feat)):
-        d = feat[i] * (act - mu) / (sigma * sigma)
+        d = feat[i] * (act - mu) / (sigma ** 2)
         deriv.append(d)
-    deriv.append((act - mu) / (sigma * sigma))
-    deriv.append((- sigma +(act - mu)*(act-mu) / sigma) / (2*sigma*sigma))
+    deriv.append((act - mu) / (sigma ** 2))
+    deriv.append((- sigma +(act - mu)**2 / sigma) / (2*sigma**2))
     return np.array(deriv)
 
 def linearvalue(features, params, t, T):
@@ -106,6 +106,15 @@ def lstsqu_constraint(x, a, b):
 
 def gradient_constraint(x, fisher):
     return delta - np.dot(x, np.dot(fisher, x))
+
+def variance_constraint(x, y):
+    return np.var(x) - 1
+
+def max_constraint(x):
+    return max_objective(x) - 10
+
+def max_objective(x):
+    return max(np.abs(x))
 
 def generate_trajectories(min_iterations = 10, min_samples = 10000, env = None, policy = None, feature_params = None, feature_type = "linear", render_first = False):
     if env == None:
@@ -253,16 +262,22 @@ def update_value_and_policy(trajectories = None, policy = None, value = None, fe
             "args": [fisheravg]
         }
     ]
-    [update, residuals, rank, singular] = np.linalg.lstsq(fisheravg,gavg,rcond = None)
+    [update, residuals, rank, singular] = np.linalg.lstsq(fisheravg,gavg,rcond = 0.00005)
     #opt_result = scipy.optimize.minimize(fun = np.dot, args = -gavg, x0 = update, method = "SLSQP", constraints = gradient_constraints)
-    opt_result = scipy.optimize.minimize(fun = np.var, x0 = update, method = "SLSQP", constraints = var_constraints)
-    update = opt_result.x
+    #opt_result = scipy.optimize.minimize(fun = np.var, x0 = update, method = "SLSQP", constraints = var_constraints)
+    #update = opt_result.x
     stepsize = math.sqrt(delta / np.abs(np.dot(update, gavg)))
     #update = gavg
     #stepsize = delta / max(update)
     policy += stepsize * update
     policy = list(policy)
     omega = lrate * newOmega + (1-lrate) * omega
+
+    value_diff = np.array(stats.est_values) - np.array(stats.true_values)
+    total_loss = np.linalg.norm(value_diff)
+    relative_loss = total_loss / np.linalg.norm(stats.true_values)
+    avg_loss = relative_loss / len(stats.true_values)
+    stats.avg_value_loss.append(avg_loss)
 
     stats.vanilla_mean.append(sum(np.abs(gavg)) / len(gavg))
     stats.vanilla_variance.append(np.var(np.abs(gavg)))
@@ -284,7 +299,7 @@ def main():
     policy = []
     trajectories = [] #t, s, a, r, s', dln(p)
     numobs = env.observation_space.shape[0]
-    numfeat = 500
+    numfeat = 729
     feature_type = "rbf"
     render_first = False
     maxReward = 10 ** 10
@@ -297,8 +312,6 @@ def main():
 
     print(policy)
     print(omega)
-    avgRewards = []
-    sigmas = np.array([])
 
     for gen in range(5000):
         [trajectories, totalr] = generate_trajectories(render_first = render_first, env = env, min_iterations = 10, min_samples = 1, policy = policy, feature_params = feature_params, feature_type = feature_type)
@@ -306,8 +319,8 @@ def main():
 
         print(['Generation',gen])
         print(['Avg Reward', totalr / iterations])
-        avgRewards.append(totalr/iterations)
-        sigmas = np.append(sigmas, policy[-1])
+        stats.avg_rewards.append(totalr/iterations)
+        stats.sigmas.append(policy[-1])
 
         global delta
         if gen == 0:
@@ -317,45 +330,45 @@ def main():
 
         lrate = 1.0
 
-        if avgRewards[-1] < maxReward:
+        if stats.avg_rewards[-1] < maxReward:
             [policy, omega, stats] = update_value_and_policy(lrate = lrate, trajectories = trajectories, policy = policy, value = omega, feature_params = feature_params, feature_type = feature_type, stats = stats)
         print(['policy', policy])
 
         if np.mod(gen,50) == 0:
             plt.scatter(stats.thetas, stats.true_values)
             plt.scatter(stats.thetas, stats.est_values)
+            plt.legend(['true values', 'estimated values'])
             plt.show()   
+            plt.semilogy(range(len(stats.avg_value_loss)), stats.avg_value_loss)
+            plt.legend(['average value loss'])
+            plt.show()
             plt.scatter(stats.thetas, stats.actions_taken)
+            plt.legend(['actions taken'])
             plt.show()
-            plt.scatter(range(len(avgRewards)), avgRewards)
-            plt.scatter(range(len(sigmas)), sigmas)
+            plt.plot(stats.avg_rewards)
+            plt.plot(stats.sigmas)
+            plt.legend(['average rewards', 'sigma (policy)'])
             plt.show()
-            plt.semilogy(range(len(stats.update_variance)), stats.update_variance)
-            plt.semilogy(range(len(stats.vanilla_variance)), stats.vanilla_variance)
+            plt.semilogy(stats.update_variance)
+            plt.semilogy(stats.vanilla_variance)
+            plt.legend(['natural gradient variance', 'vanilla gradient variance'])
             plt.show()
-            plt.semilogy(range(len(stats.update_mean)), stats.update_mean)
-            plt.semilogy(range(len(stats.vanilla_mean)), stats.vanilla_mean)
+            plt.semilogy(stats.update_error)
+            plt.legend(['natural gradient error'])
             plt.show()
-            plt.semilogy(range(len(stats.update_max)), stats.update_max)
-            plt.semilogy(range(len(stats.vanilla_max)), stats.vanilla_max)
-            plt.show()
-            plt.semilogy(range(len(stats.update_min)), stats.update_min)
-            plt.semilogy(range(len(stats.vanilla_min)), stats.vanilla_min)
-            plt.show()
-            plt.semilogy(range(len(stats.update_error)), stats.update_error)
-            plt.show()
-            plt.scatter(range(len(stats.fisher_rank)), stats.fisher_rank)
+            plt.plot(stats.fisher_rank)
+            plt.legend(['rank of fisher matrix'])
             plt.show()
         print(['value',omega])  
 
 def compare_features():
     stats_map = {}
-    for sigma_rbf in [0.1, 0.2, 0.5, 0.75, 1, 1.5, 2, 3, 5]:
+    for sigma_rbf in [1, 3, 5, 7, 10]:
         env = gym.make('Qube-v0')
         policy = []
         trajectories = [] #t, s, a, r, s', dln(p)
         numobs = env.observation_space.shape[0]
-        numfeat = 500
+        numfeat = 729
         feature_type = "rbf"
         render_first = False
         maxReward = 10 ** 10
@@ -366,26 +379,19 @@ def compare_features():
         policy = initialize_policy(num_features = numfeat)
         omega = initialize_value_function(num_features = numfeat)
 
-        avgRewards = []
-        sigmas = np.array([])
 
-        for gen in range(20):
-            [trajectories, totalr] = generate_trajectories(render_first = render_first, env = env, min_iterations = 20, min_samples = 1, policy = policy, feature_params = feature_params, feature_type = feature_type)
+        for gen in range(100):
+            [trajectories, totalr] = generate_trajectories(render_first = render_first, env = env, min_iterations = 1, min_samples = 10000, policy = policy, feature_params = feature_params, feature_type = feature_type)
             iterations = len(trajectories)
 
-            avgRewards.append(totalr/iterations)
-            sigmas = np.append(sigmas, policy[-1])
+            stats.avg_rewards.append(totalr/iterations)
+            stats.sigmas.append(policy[-1])
 
             lrate = 1.0
 
-            if avgRewards[-1] < maxReward:
+            if stats.avg_rewards[-1] < maxReward:
                 [policy, omega, stats] = update_value_and_policy(lrate = lrate, trajectories = trajectories, policy = policy, value = omega, feature_params = feature_params, feature_type = feature_type, stats = stats)
 
-                value_diff = np.array(stats.est_values) - np.array(stats.true_values)
-                total_loss = np.linalg.norm(value_diff)
-                relative_loss = total_loss / np.linalg.norm(stats.true_values)
-                avg_loss = relative_loss / len(stats.true_values)
-                stats.avg_value_loss.append(avg_loss)
                 #print("len(true_values): {}, value_diff: {}, relative_diff: {}, relative_loss: {}, avg_loss: {}".format(len(stats.true_values), value_diff, relative_diff, relative_loss, avg_loss))
         stats_map[str(sigma_rbf)] = stats
 
@@ -393,9 +399,17 @@ def compare_features():
         stats = stats_map[sigma_rbf]
         print(sigma_rbf)
         avg_last_10 = sum(stats.avg_value_loss[10:]) / 10
-        print(avg_last_10)
-        plt.scatter(range(len(stats.avg_value_loss)), stats.avg_value_loss)
-        plt.show()
+        print("average value loss: {}".format(avg_last_10))
+        print("average reward: {}".format(stats.avg_rewards[-1]))
+        plt.plot(stats.avg_rewards)
+    plt.legend(list(stats_map.keys()))
+    plt.show()
+
+    for sigma_rbf in stats_map:
+        stats = stats_map[sigma_rbf]
+        plt.semilogy(stats.avg_value_loss)
+    plt.legend(list(stats_map.keys()))
+    plt.show()
 
 main()
 #compare_features()
