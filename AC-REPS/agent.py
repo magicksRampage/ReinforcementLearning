@@ -10,6 +10,7 @@ import quanser_robots
 
 INITIAL_ETA = 1
 EPISODE_LENGTH = 100
+BATCH_SIZE = 3
 
 
 class Agent:
@@ -30,7 +31,7 @@ class Agent:
             # TODO: define conversion target
             print("---------------------")
             print("---------------------")
-            print("----Episode ", i, "----")
+            print("----Episode ", i+1, "----")
             print("---------------------")
             print("---------------------")
             prev_time = time.clock()
@@ -43,14 +44,15 @@ class Agent:
     def train_step(self):
         """
         Update policy through the following 4 steps:
-            1. Generate an episode
+            1. Generate a batch of episodes
             2. Define Q through Critic
             3. Define V by minimizing the dual
             4. Define a new policy through actor
         :return:
         """
 
-        self.generate_episode()
+        for i in range(0, BATCH_SIZE):
+            self.generate_episode()
         self.q_critic = q_critic.QCritic(self.rollouts)
         print("Q-Critic fitted")
         self.v_critic = v_critic.VCritic(self.rollouts, self.q_critic)

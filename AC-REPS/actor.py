@@ -31,7 +31,7 @@ class Actor:
         self._calculate_weights()
         self.model = model.Model(model.RANDOM_RBFS,
                                  np.shape(self.rollouts[0].states[0])[0],
-                                 number_of_basis_functions=5)
+                                 number_of_basis_functions=10)
         self.variance = 1.0
         self._fit()
 
