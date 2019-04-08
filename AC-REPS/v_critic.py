@@ -12,12 +12,12 @@ INITIAL_PARAMETER_SCALE = 0.0
 
 class VCritic:
 
-    def __init__(self, samples, q_critic):
-        self.samples = samples
+    def __init__(self, rollouts, q_critic):
+        self.rollouts = rollouts
         self.q_critic = q_critic
         self.eta = INITIAL_ETA
         self.model = model.Model(model.POLYNOMIAL_LINEAR,
-                                 np.shape(self.samples[0][0])[0])
+                                 np.shape(self.rollouts[0].states[0])[0])
         self._minimize_dual()
 
     def _minimize_dual(self):
@@ -40,7 +40,13 @@ class VCritic:
         self.model.parameters = res.x[0:res.x.size-1]
         self.eta = res.x[-1]
         print(res)
+        number_of_samples = self.rollouts[0].length
+        average_v = 0.0
+        for i in range(0, number_of_samples):
+            average_v = (1/number_of_samples) * self.estimate_v(self.rollouts[0].states[i])
+
         print("Fitting V_Critic_Time: ", time.clock() - prev_time)
+        print("Average V: ", average_v)
 
     def _wrap_inputs(self, arg):
         return self.evaluate_dual(arg[-1], arg[0:arg.size-1])
@@ -52,9 +58,9 @@ class VCritic:
             return np.inf
         if parameters is not None:
             self.model.parameters = parameters
-        number_of_samples = np.shape(self.samples[0])[0]
-        states = self.samples[0]
-        actions = self.samples[1]
+        number_of_samples = self.rollouts[0].length
+        states = self.rollouts[0].states
+        actions = self.rollouts[0].actions
         exp_sum = 0.0
         average_state = np.zeros(np.shape(states[0]))
         exp_regulator = 0.0

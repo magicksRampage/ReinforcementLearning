@@ -14,7 +14,7 @@ from scipy.stats import norm
 
 class Actor:
 
-    def __init__(self, samples, q_critic, v_critic, old_actor):
+    def __init__(self, rollouts, q_critic, v_critic, old_actor):
         """
 
         :param samples: The observations of the last roll-out containing (states, actions, following_states, rewards)
@@ -22,21 +22,22 @@ class Actor:
         :param v_critic: The object estimating the V-Function
         :param old_actor: The object defining the previous policy
         """
-        self.samples = samples
+        self.rollouts = rollouts
         self.q_critic = q_critic
         self.v_critic = v_critic
         # The old actor will be none in the first run so we explore randomly
         self.old_actor = old_actor
         self.regulated_weights = None
         self._calculate_weights()
-        self.model = model.Model(model.POLYNOMIAL_LINEAR,
-                                 np.shape(self.samples[0][0])[0])
+        self.model = model.Model(model.RANDOM_RBFS,
+                                 np.shape(self.rollouts[0].states[0])[0],
+                                 number_of_basis_functions=5)
         self.variance = 1.0
         self._fit()
 
     def _calculate_weights(self):
-        states = self.samples[0]
-        actions = self.samples[1]
+        states = self.rollouts[0].states
+        actions = self.rollouts[0].actions
         number_of_samples = np.shape(states)[0]
         vc = self.v_critic
         qc = self.q_critic
@@ -76,23 +77,25 @@ class Actor:
         return self._calc_regulated_kl_distance()
 
     def _calc_regulated_kl_distance(self):
-        states = self.samples[0]
-        actions = self.samples[1]
+        states = self.rollouts[0].states
+        actions = self.rollouts[0].actions
         number_of_samples = np.shape(states)[0]
         regulated_sum = 0.0
         for i in range(0, number_of_samples):
             pi = self._policy_probability(states[i], actions[i])
             if pi <= 0.0:
                 return np.inf
-            regulated_sum += self.regulated_weights[i] * np.log()
+            regulated_sum += self.regulated_weights[i] * np.log(self._policy_probability(states[i], actions[i]))
         # Ignore the regulator term as it is constant
         regulated_kl_distance = -regulated_sum * (1 / number_of_samples)  # +np.exp(weight_regulator)
         return regulated_kl_distance
 
     def _policy_probability(self, state, action):
         mean = self.model.evaluate(state)
+        if self.variance <= 0.0:
+            return np.abs(mean - action) < 1e-6
         return norm(loc=mean, scale=self.variance).pdf(action)
 
     def act(self, state):
         mean = self.model.evaluate(state)
-        return np.clip(norm.rvs(loc=mean, scale=self.variance))
+        return np.clip(norm.rvs(loc=mean, scale=self.variance), 0, 1)
