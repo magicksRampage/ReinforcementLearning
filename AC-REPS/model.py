@@ -39,7 +39,6 @@ class Model:
             self.number_of_basis_functions = self.number_of_parameters
 
         elif self.model_name == RANDOM_RBFS:
-            print("RBFS are many times (~ 10-100x) slower than polynomial basis-functions!")
             if self.number_of_basis_functions is None:
                 print("No number of basis_functions has been chosen for RBFS.")
                 print("The model will try to evenly tile the input-space.")
@@ -48,8 +47,8 @@ class Model:
                 self.number_of_parameters = np.power(2, self.len_in) + 1
             else:
                 self.number_of_parameters = self.number_of_basis_functions
-            # Inner parameters contain multivariate mean
-            self.number_of_inner_parameters = len_in * self.number_of_parameters
+            # Inner parameters contain multivariate means and one general multivariate variance
+            self.number_of_inner_parameters = len_in * self.number_of_parameters + len_in
 
         else:
             print("Model name is not one of the designated model names!")
@@ -60,7 +59,7 @@ class Model:
     def _initialize_parameters(self):
         # Let every basis function influence the outcome at first
         if self.model_name == RANDOM_RBFS:
-            self.inner_parameters = np.zeros((self.number_of_inner_parameters, 1))
+            self.inner_parameters = np.ones((self.number_of_inner_parameters, 1))
             if self.number_of_basis_functions is None:
                 # Place Gaussians on the corners of the space
                 for i in itertools.product([0, 1], repeat=self.len_in):
@@ -69,7 +68,7 @@ class Model:
                         means_processed += i[j] * np.power(2, self.len_in - (j+1))
                     for j in range(0, self.len_in):
                         self.inner_parameters[int(means_processed * self.len_in + j)] = i[j]
-                # Place one wider gaussian over the center of the space
+                # Place one gaussian over the center of the space
                 for i in range(0, self.len_in):
                     self.inner_parameters[-(i+1)] = 0.5
             else:
@@ -107,16 +106,20 @@ class Model:
                 n = self.number_of_basis_functions
             # Interpret the space under one sigma as the relevant support for a gaussian
             # Now adjust the support that each gaussian "covers one corner of your space"
-            var = np.sqrt(dim) * (1 / 2)
+            in_var = self.inner_parameters[-(dim+1):-1]
             for i in range(0, n):
-                myu = self.inner_parameters[i*dim:(i+1)*dim]
-                # This call takes up >90% of the eval_function-time and makes RBFS really slow
-                evaluated_basis_functions[i] = stats.multivariate_normal(mean=np.reshape(myu, (-1,)), cov=var).pdf(args)
+                mean = self.inner_parameters[i*dim:(i+1)*dim]
+                # Using the pseudo-multi-variate gaussian improves speed drastically
+                evaluated_basis_functions[i] = self._evaluate_pseudo_mv_gaussian(args, mean, in_var)
 
-        if self.model_name == RANDOM_RBFS:
-            result = np.dot(self.parameters[:self.number_of_basis_functions], np.array(evaluated_basis_functions))
-        else:
-            result = np.dot(self.parameters, np.array(evaluated_basis_functions))
+        result = np.dot(self.parameters, np.array(evaluated_basis_functions))
         return result
 
+    def _evaluate_pseudo_mv_gaussian(self, args, mean, inverted_var):
+        # Ignore any constant parts of a multivariate gaussian as the parameters adopt anyway
+        diff_vec = np.reshape(args, (-1,1)) - np.reshape(mean, (-1,1))
+         # Handle the variances as if the covariance-matrix had already been inverted. Optimization will adapt
+        inv_covar = np.diag(np.reshape(inverted_var,(-1,)))
+        result = np.matmul(np.matmul(np.transpose(diff_vec), inv_covar), diff_vec) [0]
+        return result
 
