@@ -9,8 +9,8 @@ import quanser_robots
 
 
 INITIAL_ETA = 1
-EPISODE_LENGTH = 100
-NUMBER_OF_BATCHES = 3
+MAX_EPISODE_LENGTH = 100
+NUMBER_OF_BATCHES = 5
 
 
 class Agent:
@@ -139,7 +139,8 @@ class Agent:
         rewards = ()
 
         done = False
-        while not done:
+        steps = 0
+        while (not done) & (steps < MAX_EPISODE_LENGTH):
             if self.actor is None:
                 # If you haven't trained an actor explore randomly
                 action = self._denormalize(np.clip(np.random.normal(0.5, 0.5), 0, 1),
@@ -164,6 +165,7 @@ class Agent:
             rewards += (reward,)
             norm_prev_obs = norm_obs
             self.env.render()
+            steps += 1
         self.env.close()
 
         number_of_samples = np.shape(norm_states)[0]

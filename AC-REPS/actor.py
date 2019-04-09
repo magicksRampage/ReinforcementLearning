@@ -60,7 +60,7 @@ class Actor:
                        initial_values,
                        jac=False,
                        method='SLSQP',
-                       bounds=constraints,
+                       # bounds=constraints,
                        options={'ftol': 1e-6, 'disp': False})
         self.model.parameters = res.x[0:-1]
         print(res)
@@ -71,20 +71,37 @@ class Actor:
         return self._calc_regulated_kl_distance()
 
     def _calc_regulated_kl_distance(self):
+        #---Profiling---
+        start_time = time.clock()
+        #---
         regulated_kl_distance = 0.0
         for i in range(0, np.size(self.rollouts)):
             states = self.rollouts[0].states
             actions = self.rollouts[0].actions
             number_of_samples = np.shape(states)[0]
             regulated_sum = 0.0
+            # ---Profiling---
+            start_rollout_time = time.clock()
+            pi_time = 0.0
+            # ---
             for j in range(0, number_of_samples):
+                # ---Profiling---
+                prev_time= time.clock()
+                # ---
                 pi = self._policy_probability(states[j], actions[j])
+                # ---Profiling---
+                pi_time += time.clock() - prev_time
+                # ---
                 if pi <= 0.0:
                     return np.inf
-                regulated_sum += self.regulated_weights[j] * np.log(self._policy_probability(states[j], actions[j]))
+                regulated_sum += self.regulated_weights[j] * np.log(pi)
+            # ---Profiling---
+            print("Relative time to calculate pi: ", np.round(pi_time / (time.clock() - start_rollout_time), 2))
+            # ---
             # Ignore the regulator term as it is constant
             regulated_kl_distance += -regulated_sum * (1 / number_of_samples)  # +np.exp(weight_regulator)
 
+        print("Time used to calculate the regulated_kl_distance: ", time.clock()-start_time)
         return regulated_kl_distance
 
     def _policy_probability(self, state, action):
