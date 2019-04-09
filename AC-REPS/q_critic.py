@@ -8,7 +8,7 @@ import torch.optim as optim
 # TODO: Hyper-parameter: Decay-rate for the rewards and Qs
 DECAY = 0.98
 # TODO: Computability: max_epoches
-MAX_EPOCHS = 2500
+MAX_EPOCHS = 1000
 
 
 class QCritic:
@@ -21,7 +21,9 @@ class QCritic:
         # Size of an action
         self.n_out = np.size(rollouts[0].actions[0])
         # Feed the NN all the samples
-        self.batch_size = rollouts[0].length
+        self.batch_sizes = ()
+        for i in range(0, np.size(self.rollouts)):
+            self.batch_sizes += (self.rollouts[i].length,)
         # Init Neural Network
         self.model = nn.Sequential(nn.Linear(self.n_in, self.n_h),
                                    nn.ReLU(),
@@ -36,43 +38,51 @@ class QCritic:
         self._fit()
 
     def _fit(self):
-        states = self.rollouts[0].states
-        actions = self.rollouts[0].actions
-        next_states = self.rollouts[0].next_states
-        rewards = torch.from_numpy(self.rollouts[0].rewards)
+        print("Starting to fit NN")
+        model_input_batches = ()
+        reward_batches = ()
+        for i in range(0, np.size(self.rollouts)):
+            states = self.rollouts[i].states
+            actions = self.rollouts[i].actions
+            rewards = torch.from_numpy(self.rollouts[i].rewards)
+            model_input = np.zeros((self.batch_sizes[i],
+                                    np.size(states[0]) + np.size(actions[0]),))
+            model_input[:, 0:np.shape(states)[1]] = states
+            model_input[:, np.shape(states)[1]:] = actions
+            model_input = torch.from_numpy(model_input)
+            # Switch to float because the NN demands it ?.?
+            model_input_batches += (model_input.float(),)
+            reward_batches += (rewards.float(),)
 
-        model_input = np.zeros((self.batch_size,
-                                np.size(states[0]) + np.size(actions[0]),))
-        model_input[:, 0:np.shape(states)[1]] = states
-        model_input[:, np.shape(states)[1]:] = actions
-        model_input = torch.from_numpy(model_input)
-        # Switch to float because the NN demands it ?.?
-        model_input = model_input.float()
-        rewards = rewards.float()
+
         loss = np.inf
         epoch = 0
         # TODO: Hyper-parameter: loss_threshold
         loss_threshold = 1e-6
         while (loss > loss_threshold) & (epoch < MAX_EPOCHS):
-            # Forward Propagation
-            predictions = self.model(model_input)
-            number_of_predictions = predictions.size()[0]
-            average_prediction = 0.0
-            average_reward = 0.0
-            for i in range(0, number_of_predictions):
-                average_prediction += (1/number_of_predictions) * predictions[i]
-                average_reward += (1/number_of_predictions) * rewards[i]
+            prediction_batches = ()
+            target_batches = ()
+            for i in range(0, np.shape(self.rollouts)[0]):
+                # Forward Propagation
+                predictions = self.model(model_input_batches[i])
+                prediction_batches += (predictions,)
 
-            # Define the Td-Q-Targets arcording to n-look-ahead in the sampels
-            target = rewards.clone()
-            td_range = 1
-            for td_step in range(1, 1+td_range):
-                if td_step == td_range:
-                    target[0:target.size()[0] - td_step] += np.power(DECAY, td_step) * predictions[td_step:]
-                else:
-                    target[0:target.size()[0] - td_step] += np.power(DECAY, td_step) * rewards[td_step:]
+                # Define the Td-Q-Targets according to n-look-ahead in the sampels
+                rewards = reward_batches[i]
+                targets = rewards.clone()
+                td_range = 1
+                for td_step in range(1, 1 + td_range):
+                    if td_step == td_range:
+                        targets[0:targets.size()[0] - td_step] += np.power(DECAY, td_step) * predictions[td_step:]
+                    else:
+                        targets[0:targets.size()[0] - td_step] += np.power(DECAY, td_step) * rewards[td_step:]
+                target_batches += (targets,)
+
+
             # Compute and print loss
-            loss = self.criterion(predictions, target)
+            loss = 0.0
+            for i in range(0, np.shape(self.rollouts)[0]):
+                loss += self.criterion(prediction_batches[i], target_batches[i])
             epoch += 1
             # print('epoch: ', epoch, ' loss: ', loss.item(), ' Average Prediction: ', average_prediction)
 
@@ -82,7 +92,7 @@ class QCritic:
             # perform a backward pass (backpropagation)
             if (loss < loss_threshold) | (epoch == MAX_EPOCHS):
                 # print(rewards)
-                print('epoch: ', epoch, ' loss: ', loss.item(), ' Average Prediction: ', average_prediction)
+                print('epoch: ', epoch, ' loss: ', loss.item())
                 loss.backward()
             else:
                 loss.backward(retain_graph=True)

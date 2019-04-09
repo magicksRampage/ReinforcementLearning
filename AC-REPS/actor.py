@@ -1,10 +1,3 @@
-"""
-Simple class determining and defining a policy.
-
-Functions
----------
-- act : returns an action given a state
-"""
 import numpy as np
 import model
 import time
@@ -13,11 +6,14 @@ from scipy.stats import norm
 
 
 class Actor:
+    """
+
+    """
 
     def __init__(self, rollouts, q_critic, v_critic, old_actor):
         """
 
-        :param samples: The observations of the last roll-out containing (states, actions, following_states, rewards)
+        :param rollout: The observations of the last roll-out containing (states, actions, following_states, rewards)
         :param q_critic: The object estimating the Q-Function
         :param v_critic: The object estimating the V-Function
         :param old_actor: The object defining the previous policy
@@ -29,9 +25,8 @@ class Actor:
         self.old_actor = old_actor
         self.regulated_weights = None
         self._calculate_weights()
-        self.model = model.Model(model.RANDOM_RBFS,
-                                 np.shape(self.rollouts[0].states[0])[0],
-                                 number_of_basis_functions=10)
+        self.model = model.Model(model.POLYNOMIAL_LINEAR,
+                                 np.shape(self.rollouts[0].states[0])[0])
         self.variance = 1.0
         self._fit()
 
@@ -66,10 +61,9 @@ class Actor:
                        jac=False,
                        method='SLSQP',
                        bounds=constraints,
-                       options={'ftol': 1e-6, 'disp': True})
+                       options={'ftol': 1e-6, 'disp': False})
         self.model.parameters = res.x[0:-1]
         print(res)
-        print("Fitting Actor_Time: ", time.clock() - prev_time)
 
     def _wrap_inputs(self, values):
         self.model.parameters = values[0:-1]
@@ -77,17 +71,20 @@ class Actor:
         return self._calc_regulated_kl_distance()
 
     def _calc_regulated_kl_distance(self):
-        states = self.rollouts[0].states
-        actions = self.rollouts[0].actions
-        number_of_samples = np.shape(states)[0]
-        regulated_sum = 0.0
-        for i in range(0, number_of_samples):
-            pi = self._policy_probability(states[i], actions[i])
-            if pi <= 0.0:
-                return np.inf
-            regulated_sum += self.regulated_weights[i] * np.log(self._policy_probability(states[i], actions[i]))
-        # Ignore the regulator term as it is constant
-        regulated_kl_distance = -regulated_sum * (1 / number_of_samples)  # +np.exp(weight_regulator)
+        regulated_kl_distance = 0.0
+        for i in range(0, np.size(self.rollouts)):
+            states = self.rollouts[0].states
+            actions = self.rollouts[0].actions
+            number_of_samples = np.shape(states)[0]
+            regulated_sum = 0.0
+            for j in range(0, number_of_samples):
+                pi = self._policy_probability(states[j], actions[j])
+                if pi <= 0.0:
+                    return np.inf
+                regulated_sum += self.regulated_weights[j] * np.log(self._policy_probability(states[j], actions[j]))
+            # Ignore the regulator term as it is constant
+            regulated_kl_distance += -regulated_sum * (1 / number_of_samples)  # +np.exp(weight_regulator)
+
         return regulated_kl_distance
 
     def _policy_probability(self, state, action):

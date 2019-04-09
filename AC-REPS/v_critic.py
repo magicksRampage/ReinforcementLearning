@@ -36,7 +36,7 @@ class VCritic:
                        initial_values,
                        method='SLSQP',
                        bounds=constraints,
-                       options={'disp': True})
+                       options={'disp': False})
         self.model.parameters = res.x[0:res.x.size-1]
         self.eta = res.x[-1]
         print(res)
@@ -45,7 +45,6 @@ class VCritic:
         for i in range(0, number_of_samples):
             average_v = (1/number_of_samples) * self.estimate_v(self.rollouts[0].states[i])
 
-        print("Fitting V_Critic_Time: ", time.clock() - prev_time)
         print("Average V: ", average_v)
 
     def _wrap_inputs(self, arg):
@@ -58,27 +57,30 @@ class VCritic:
             return np.inf
         if parameters is not None:
             self.model.parameters = parameters
-        number_of_samples = self.rollouts[0].length
-        states = self.rollouts[0].states
-        actions = self.rollouts[0].actions
-        exp_sum = 0.0
-        average_state = np.zeros(np.shape(states[0]))
-        exp_regulator = 0.0
-        running_max_value = -np.inf
-        for i in range(0, number_of_samples):
-            exponent = ((self.q_critic.estimate_q(states[i], actions[i]) - self.estimate_v(states[i])) / eta)
-            if exponent > running_max_value:
-                running_max_value = exponent
-        exp_regulator = running_max_value + np.log(number_of_samples)
-        for i in range(0, number_of_samples):
-            average_state += (1 / number_of_samples) * states[i]
 
-            exp_sum += np.exp(((self.q_critic.estimate_q(states[i], actions[i]) - self.estimate_v(states[i])) / eta)
-                              - exp_regulator)
         dual = 0.0
-        dual += EPSILON*eta
-        dual += self.estimate_v(average_state)
-        dual += eta * (np.log(exp_sum) - np.log(number_of_samples) + exp_regulator)
+        for i in range(0, np.size(self.rollouts)):
+            number_of_samples = self.rollouts[i].length
+            states = self.rollouts[i].states
+            actions = self.rollouts[i].actions
+            exp_sum = 0.0
+            average_state = np.zeros(np.shape(states[0]))
+            running_max_value = -np.inf
+            for j in range(0, number_of_samples):
+                exponent = ((self.q_critic.estimate_q(states[j], actions[j]) - self.estimate_v(states[j])) / eta)
+                if exponent > running_max_value:
+                    running_max_value = exponent
+            exp_regulator = running_max_value + np.log(number_of_samples)
+            for j in range(0, number_of_samples):
+                average_state += (1 / number_of_samples) * states[j]
+
+                exp_sum += np.exp(((self.q_critic.estimate_q(states[j], actions[j]) - self.estimate_v(states[j])) / eta)
+                                  - exp_regulator)
+
+            dual += EPSILON * eta
+            dual += self.estimate_v(average_state)
+            dual += eta * (np.log(exp_sum) - np.log(number_of_samples) + exp_regulator)
+
         # print(".")
         # print(parameters, eta)
         return dual
