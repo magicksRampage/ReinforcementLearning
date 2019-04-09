@@ -8,9 +8,8 @@ import v_critic
 import quanser_robots
 
 
-INITIAL_ETA = 1
 MAX_EPISODE_LENGTH = 200
-NUMBER_OF_BATCHES = 3
+NUMBER_OF_BATCHES = 5
 
 
 class Agent:
@@ -58,17 +57,19 @@ class Agent:
         converged = False
         for i in range(0, 50):
             # TODO: define conversion target
+            print("")
             print("---------------------")
             print("---------------------")
-            print("----Episode ", i+1, "----")
+            print("---- Episode ", i+1, "----")
             print("---------------------")
             print("---------------------")
+            print("")
             prev_time = time.clock()
             self.train_step()
+            print("")
             print("---------------------")
             print("----Time Elapsed for the episode: ", int(time.clock()-prev_time), "----")
             print("---------------------")
-            print("")
 
     def train_step(self):
         """
@@ -97,17 +98,36 @@ class Agent:
             self.generate_episode()
         print("---Generated Episodes in ", int(time.clock()-prev_time), " Seconds---")
 
+        n = 0.0
+        reward_sum = 0.0
+        for i in range(0, NUMBER_OF_BATCHES):
+            rollout = self.rollouts[0]
+            for j in range(0, rollout.length):
+                reward_sum += rollout.rewards[j]
+                n += 1
+        average_reward = reward_sum / n
+
+        print("---------------------")
+        print("----Average Reward: ", average_reward, "----")
+        print("---------------------")
+
         prev_time = time.clock()
         self.q_critic = q_critic.QCritic(self.rollouts)
+        print("---------------------")
         print("---Q-Critic fitted in ", int(time.clock()-prev_time), " Seconds---")
+        print("---------------------")
 
         prev_time = time.clock()
         self.v_critic = v_critic.VCritic(self.rollouts, self.q_critic)
+        print("---------------------")
         print("---V-Critic fitted in ", int(time.clock()-prev_time), " Seconds---")
+        print("---------------------")
 
         prev_time = time.clock()
         self.actor = ac.Actor(self.rollouts, self.q_critic, self.v_critic, self.actor)
+        print("---------------------")
         print("---Policy fitted in ", int(time.clock()-prev_time), " Seconds---")
+        print("---------------------")
 
         self.rollouts = ()
 
@@ -143,7 +163,7 @@ class Agent:
         while (not done) & (steps < MAX_EPISODE_LENGTH):
             if self.actor is None:
                 # If you haven't trained an actor explore randomly
-                action = self._denormalize(np.clip(np.random.normal(0.5, 0.5), 0, 1),
+                action = self._denormalize(np.clip(np.random.normal(0.5, np.sqrt(2)), 0, 1),
                                            self.action_dimension[0],
                                            self.action_dimension[1])
             else:

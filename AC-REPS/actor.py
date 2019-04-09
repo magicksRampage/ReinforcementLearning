@@ -27,7 +27,7 @@ class Actor:
         self._calculate_weights()
         self.model = model.Model(model.POLYNOMIAL_LINEAR,
                                  np.shape(self.rollouts[0].states[0])[0])
-        self.variance = 1.0
+        self.std_deviation = 1.0
         self._fit()
 
     def _calculate_weights(self):
@@ -52,22 +52,24 @@ class Actor:
     def _fit(self):
         print("Handing of work to scipy")
         prev_time = time.clock()
-        initial_values = np.append(self.model.parameters, [self.variance])
+        initial_values = np.append(self.model.parameters, [self.std_deviation])
+
         constraints = ()
         for i in range(0, initial_values.size):
-            constraints += ((0, None),)
+            constraints += ((-1, 1),)
+
         res = minimize(self._wrap_inputs,
                        initial_values,
                        jac=False,
                        method='SLSQP',
                        # bounds=constraints,
-                       options={'ftol': 1e-6, 'disp': False})
-        self.model.parameters = res.x[0:-1]
+                       options={'ftol': 1e-6, 'disp': False}
+                       )
         print(res)
 
     def _wrap_inputs(self, values):
         self.model.parameters = values[0:-1]
-        self.variance = values[-1]
+        self.std_deviation = values[-1]
         return self._calc_regulated_kl_distance()
 
     def _calc_regulated_kl_distance(self):
@@ -96,20 +98,29 @@ class Actor:
                     return np.inf
                 regulated_sum += self.regulated_weights[j] * np.log(pi)
             # ---Profiling---
-            print("Relative time to calculate pi: ", np.round(pi_time / (time.clock() - start_rollout_time), 2))
+            # print("Relative time to calculate pi: ", np.round(pi_time / (time.clock() - start_rollout_time), 2))
             # ---
             # Ignore the regulator term as it is constant
             regulated_kl_distance += -regulated_sum * (1 / number_of_samples)  # +np.exp(weight_regulator)
 
-        print("Time used to calculate the regulated_kl_distance: ", time.clock()-start_time)
+        # print("Time used to calculate the regulated_kl_distance: ", time.clock()-start_time)
         return regulated_kl_distance
 
     def _policy_probability(self, state, action):
         mean = self.model.evaluate(state)
-        if self.variance <= 0.0:
-            return np.abs(mean - action) < 1e-6
-        return norm(loc=mean, scale=self.variance).pdf(action)
+        return self._gaussian_pdf(mean, self.std_deviation, action)
+
+    def _gaussian_pdf(self, mean, std_deviation, value):
+        if std_deviation == 0.0:
+            return float(np.abs(mean-value) < 1e-6)
+        result = (np.exp(-(value - mean)**2 / (2 * std_deviation ** 2)) / np.sqrt(2 * np.pi * std_deviation ** 2))
+        return result
 
     def act(self, state):
         mean = self.model.evaluate(state)
-        return np.clip(norm.rvs(loc=mean, scale=self.variance), 0, 1)
+        print(mean, self.std_deviation)
+        sample = norm.rvs(loc=mean, scale=np.abs(self.std_deviation))
+        while (sample < 0) | (sample < mean):
+            print("Draw another sample")
+            sample = norm.rvs(loc=mean, scale=np.abs(self.std_deviation))
+        return np.clip(sample, 0, 1)

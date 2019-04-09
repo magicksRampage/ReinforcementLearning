@@ -29,13 +29,13 @@ class Model:
         elif self.model_name == POLYNOMIAL_QUADRATIC:
             if self.number_of_basis_functions is not None:
                 print("The number of basis functions for polynomial models are fixed")
-            self.number_of_parameters = len_in + np.power(len_in, 2)
+            self.number_of_parameters = np.power(len_in, 2)
             self.number_of_basis_functions = self.number_of_parameters
 
         elif self.model_name == POLYNOMIAL_CUBIC:
             if self.number_of_basis_functions is not None:
                 print("The number of basis functions for polynomial models are fixed")
-            self.number_of_parameters = len_in + np.power(len_in, 2) + np.power(len_in, 3)
+            self.number_of_parameters = np.power(len_in, 3)
             self.number_of_basis_functions = self.number_of_parameters
 
         elif self.model_name == RANDOM_RBFS:
@@ -57,7 +57,6 @@ class Model:
         self._initialize_parameters()
 
     def _initialize_parameters(self):
-        # Let every basis function influence the outcome at first
         if self.model_name == RANDOM_RBFS:
             self.inner_parameters = np.ones((self.number_of_inner_parameters, 1))
             if self.number_of_basis_functions is None:
@@ -117,9 +116,9 @@ class Model:
 
     def _evaluate_pseudo_mv_gaussian(self, args, mean, inverted_var):
         # Ignore any constant parts of a multivariate gaussian as the parameters adopt anyway
-        diff_vec = np.reshape(args, (-1,1)) - np.reshape(mean, (-1,1))
-         # Handle the variances as if the covariance-matrix had already been inverted. Optimization will adapt
-        inv_covar = np.diag(np.reshape(inverted_var,(-1,)))
-        result = np.matmul(np.matmul(np.transpose(diff_vec), inv_covar), diff_vec) [0]
+        diff_vec = np.reshape(args, (-1, 1)) - np.reshape(mean, (-1, 1))
+        # Handle the variances as if the covariance-matrix had already been inverted. Optimization will adapt
+        inv_covar = np.diag(np.reshape(inverted_var, (-1,)))
+        result = np.matmul(np.matmul(np.transpose(diff_vec), inv_covar), diff_vec)[0]
         return result
 

@@ -105,7 +105,7 @@ class VCritic:
 
         # print(".")
         # print(parameters, eta)
-        print("Time used to calculate the dual: ", time.clock()-start_time)
+        # print("Time used to calculate the dual: ", time.clock()-start_time)
         return dual
 
     def estimate_v(self, state):
