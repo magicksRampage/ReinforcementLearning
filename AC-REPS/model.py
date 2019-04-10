@@ -29,13 +29,13 @@ class Model:
         elif self.model_name == POLYNOMIAL_QUADRATIC:
             if self.number_of_basis_functions is not None:
                 print("The number of basis functions for polynomial models are fixed")
-            self.number_of_parameters = np.power(len_in, 2)
+            self.number_of_parameters = np.power(len_in, 2) + len_in
             self.number_of_basis_functions = self.number_of_parameters
 
         elif self.model_name == POLYNOMIAL_CUBIC:
             if self.number_of_basis_functions is not None:
                 print("The number of basis functions for polynomial models are fixed")
-            self.number_of_parameters = np.power(len_in, 3)
+            self.number_of_parameters = np.power(len_in, 3) + np.power(len_in, 2) + len_in
             self.number_of_basis_functions = self.number_of_parameters
 
         elif self.model_name == RANDOM_RBFS:
@@ -74,25 +74,27 @@ class Model:
                 for i in range(0, self.number_of_parameters):
                     for j in range(0, self.len_in):
                         self.inner_parameters[i * self.len_in + j] = np.random.random() * 2 - 1
-        # Let every basis function influence the outcome at first
-        self.parameters = np.ones((self.number_of_parameters, 1)) * 0.1
+        self.parameters = np.zeros((self.number_of_parameters, 1))
 
     def evaluate(self, args):
         evaluated_basis_functions = np.zeros(np.shape(self.parameters))
-        if self.model_name == POLYNOMIAL_LINEAR:
+        if (self.model_name == POLYNOMIAL_LINEAR) \
+           | (self.model_name == POLYNOMIAL_QUADRATIC) \
+           | (self.model_name == POLYNOMIAL_CUBIC):
             for i in range(0, self.len_in):
                 evaluated_basis_functions[i] = args[i]
 
-        elif self.model_name == POLYNOMIAL_QUADRATIC:
+        if (self.model_name == POLYNOMIAL_QUADRATIC) \
+           | (self.model_name == POLYNOMIAL_CUBIC):
             for i in range(0, self.len_in):
                 for j in range(0, self.len_in):
-                    evaluated_basis_functions[i] = args[i] * args[j]
+                    evaluated_basis_functions[(i+1)*self.len_in + j] = args[i] * args[j]
 
-        elif self.model_name == POLYNOMIAL_CUBIC:
+        if self.model_name == POLYNOMIAL_CUBIC:
             for i in range(0, self.len_in):
                 for j in range(0, self.len_in):
                     for k in range(0, self.len_in):
-                        evaluated_basis_functions[i] = args[i] * args[j] * args[k]
+                        evaluated_basis_functions[(i+1) * (self.len_in ** 2) + j*self.len_in + k] = args[i] * args[j] * args[k]
 
         elif self.model_name == RANDOM_RBFS:
             # Calculate variance so that RBFS should cover most of the space

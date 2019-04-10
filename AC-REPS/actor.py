@@ -27,7 +27,7 @@ class Actor:
         self.old_actor = old_actor
         self.regulated_weights = None
         self._calculate_weights()
-        self.model = model.Model(model.POLYNOMIAL_QUADRATIC,
+        self.model = model.Model(model.POLYNOMIAL_LINEAR,
                                  np.shape(self.rollouts[0].states[0])[0])
         self.std_deviation = 1.
         self.progress = progress
@@ -60,7 +60,7 @@ class Actor:
         constraints = ()
         for i in range(0, initial_values.size):
             if i == initial_values.size-1:
-                constraints += ((0, 1*(1-self.progress)),)
+                constraints += ((0, np.exp(-self.progress)),)
             else:
                 constraints += ((-0.5, 0.5),)
 

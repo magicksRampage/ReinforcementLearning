@@ -10,7 +10,7 @@ import quanser_robots
 
 MAX_EPISODE_LENGTH = 200
 NUMBER_OF_BATCHES = 5
-NUMBER_OF_EPISODES = 20
+NUMBER_OF_EPISODES = 100
 
 
 class Agent:
