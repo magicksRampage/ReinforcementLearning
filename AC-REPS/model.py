@@ -66,14 +66,14 @@ class Model:
                     for j in range(0, self.len_in):
                         means_processed += i[j] * np.power(2, self.len_in - (j+1))
                     for j in range(0, self.len_in):
-                        self.inner_parameters[int(means_processed * self.len_in + j)] = i[j]
+                        self.inner_parameters[int(means_processed * self.len_in + j)] = i[j] * 2 - 1
                 # Place one gaussian over the center of the space
                 for i in range(0, self.len_in):
-                    self.inner_parameters[-(i+1)] = 0.5
+                    self.inner_parameters[-(i+1)] = 0
             else:
                 for i in range(0, self.number_of_parameters):
                     for j in range(0, self.len_in):
-                        self.inner_parameters[i * self.len_in + j] = np.random.random()
+                        self.inner_parameters[i * self.len_in + j] = np.random.random() * 2 - 1
         # Let every basis function influence the outcome at first
         self.parameters = np.ones((self.number_of_parameters, 1))
 

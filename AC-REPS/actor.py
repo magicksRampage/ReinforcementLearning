@@ -120,7 +120,7 @@ class Actor:
         if std_deviation == 0.0:
             return float(np.abs(mean-value) < 1e-6)
         pdf = (np.exp(-(value - mean)**2 / (2 * std_deviation ** 2)) / np.sqrt(2 * np.pi * std_deviation ** 2))
-        cdf_inside_range = self._gaussian_cdf(mean, std_deviation, 1) - self._gaussian_cdf(mean, std_deviation, 0)
+        cdf_inside_range = self._gaussian_cdf(mean, std_deviation, 1) - self._gaussian_cdf(mean, std_deviation, -1)
         if cdf_inside_range < 1e-10:
             return 1.0
         result = pdf / cdf_inside_range
@@ -140,4 +140,4 @@ class Actor:
             redraws += 1
             sample = norm.rvs(loc=mean, scale=np.abs(self.std_deviation))
         # print("Drew ", redraws, " new samples")
-        return np.clip(sample, 0, 1)
+        return np.clip(sample, -1, 1)

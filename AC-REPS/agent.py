@@ -202,7 +202,7 @@ class Agent:
 
     def _normalize(self, value, min_value, max_value):
         """
-        Scales a value into the interval [0,1]
+        Scales a value into the interval [-1,1]
 
         :param: value: The value to be scaled
         :param: min_value: The lower bound of the interval the value originated from
@@ -210,11 +210,11 @@ class Agent:
 
         :return: The normalized Value
         """
-        return (value - min_value) / (max_value - min_value)
+        return ((value - min_value) / (max_value - min_value)) * 2 - 1
 
     def _denormalize(self, normalized_value, min_value, max_value):
         """
-        Scales a up from the interval [0,1]
+        Scales a up from the interval [-1,1]
 
         :param: value: The value to be scaled
         :param: min_value: The lower bound of the interval the value will be scaled to
@@ -222,7 +222,7 @@ class Agent:
 
         :return: The denormalized Value
         """
-        return (normalized_value * (max_value - min_value)) + min_value
+        return (((normalized_value + 1) / 2) * (max_value - min_value)) + min_value
 
 
 
