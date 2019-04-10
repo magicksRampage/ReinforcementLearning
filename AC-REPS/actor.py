@@ -3,6 +3,7 @@ import model
 import time
 from scipy.optimize import minimize
 from scipy.stats import norm
+from scipy.special import erf
 
 
 class Actor:
@@ -10,7 +11,7 @@ class Actor:
 
     """
 
-    def __init__(self, rollouts, q_critic, v_critic, old_actor):
+    def __init__(self, rollouts, q_critic, v_critic, old_actor, progress):
         """
 
         :param rollout: The observations of the last roll-out containing (states, actions, following_states, rewards)
@@ -27,7 +28,8 @@ class Actor:
         self._calculate_weights()
         self.model = model.Model(model.POLYNOMIAL_LINEAR,
                                  np.shape(self.rollouts[0].states[0])[0])
-        self.std_deviation = 1.0
+        self.std_deviation = 1.
+        self.progress = progress
         self._fit()
 
     def _calculate_weights(self):
@@ -56,13 +58,16 @@ class Actor:
 
         constraints = ()
         for i in range(0, initial_values.size):
-            constraints += ((-1, 1),)
+            if i == initial_values.size-1:
+                constraints += ((0, 1 - self.progress),)
+            else:
+                constraints += ((None, None),)
 
         res = minimize(self._wrap_inputs,
                        initial_values,
                        jac=False,
                        method='SLSQP',
-                       # bounds=constraints,
+                       bounds=constraints,
                        options={'ftol': 1e-6, 'disp': False}
                        )
         print(res)
@@ -108,19 +113,31 @@ class Actor:
 
     def _policy_probability(self, state, action):
         mean = self.model.evaluate(state)
-        return self._gaussian_pdf(mean, self.std_deviation, action)
+        return self._pseudo_gaussian_pdf(mean, self.std_deviation, action)
 
-    def _gaussian_pdf(self, mean, std_deviation, value):
+    def _pseudo_gaussian_pdf(self, mean, std_deviation, value):
+        # print(mean, "|", std_deviation, "|", value)
         if std_deviation == 0.0:
             return float(np.abs(mean-value) < 1e-6)
-        result = (np.exp(-(value - mean)**2 / (2 * std_deviation ** 2)) / np.sqrt(2 * np.pi * std_deviation ** 2))
+        pdf = (np.exp(-(value - mean)**2 / (2 * std_deviation ** 2)) / np.sqrt(2 * np.pi * std_deviation ** 2))
+        cdf_inside_range = self._gaussian_cdf(mean, std_deviation, 1) - self._gaussian_cdf(mean, std_deviation, 0)
+        if cdf_inside_range < 1e-10:
+            return 1.0
+        result = pdf / cdf_inside_range
+        # print(result, "|", pdf, "|", cdf_inside_range)
+        # print(cdf_inside_range)
         return result
+
+    def _gaussian_cdf(self, mean, std_deviation, value):
+        return (1/2) * (1 + erf((value - mean) / (2 * std_deviation**2)))
 
     def act(self, state):
         mean = self.model.evaluate(state)
-        print(mean, self.std_deviation)
+        # print(mean, self.std_deviation)
         sample = norm.rvs(loc=mean, scale=np.abs(self.std_deviation))
-        while (sample < 0) | (sample < mean):
-            print("Draw another sample")
+        redraws = 0
+        while (sample < 0) | (1 < sample):
+            redraws += 1
             sample = norm.rvs(loc=mean, scale=np.abs(self.std_deviation))
+        # print("Drew ", redraws, " new samples")
         return np.clip(sample, 0, 1)

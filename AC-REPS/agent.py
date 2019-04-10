@@ -10,6 +10,7 @@ import quanser_robots
 
 MAX_EPISODE_LENGTH = 200
 NUMBER_OF_BATCHES = 5
+NUMBER_OF_EPISODES = 50
 
 
 class Agent:
@@ -44,6 +45,7 @@ class Agent:
         self.q_critic = None
         self.v_critic = None
         self.actor = None
+        self.average_rewards = ()
 
     def train(self):
         """
@@ -55,7 +57,7 @@ class Agent:
         :return: None
         """
         converged = False
-        for i in range(0, 50):
+        for i in range(0, NUMBER_OF_EPISODES):
             # TODO: define conversion target
             print("")
             print("---------------------")
@@ -65,13 +67,14 @@ class Agent:
             print("---------------------")
             print("")
             prev_time = time.clock()
-            self.train_step()
+            self.train_step(i / NUMBER_OF_EPISODES)
             print("")
             print("---------------------")
             print("----Time Elapsed for the episode: ", int(time.clock()-prev_time), "----")
             print("---------------------")
+        print(self.average_rewards)
 
-    def train_step(self):
+    def train_step(self, progress):
         """
         Update policy through the following 4 steps:
             1. Generate a batch of episodes
@@ -124,12 +127,13 @@ class Agent:
         print("---------------------")
 
         prev_time = time.clock()
-        self.actor = ac.Actor(self.rollouts, self.q_critic, self.v_critic, self.actor)
+        self.actor = ac.Actor(self.rollouts, self.q_critic, self.v_critic, self.actor, progress)
         print("---------------------")
         print("---Policy fitted in ", int(time.clock()-prev_time), " Seconds---")
         print("---------------------")
 
         self.rollouts = ()
+        self.average_rewards += (average_reward,)
 
     def generate_episode(self):
         """
