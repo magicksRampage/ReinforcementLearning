@@ -12,6 +12,26 @@ MAX_EPOCHS = 2000
 
 
 class QCritic:
+    """
+    The abstraction of the Q-state-action-value-function
+    This function is approximated by neural network with 2 hidden layers with a width of 20
+    Each layer combines a linear layer and a rectifier-activation function
+
+    Args:
+        rollouts (object): "rollout.Rollout"-Object containing the episodes of samples
+
+    Attributes:
+        rollouts (object): "rollout.Rollout"-Object containing the episodes of samples
+        n_in (int): Size of a state-action-pair to be put into the NN
+        n_h (int): Size of the hidden layers
+        n_out (int): Size of an action
+        batch_sizes ((int),): Tuple saving the rollout lengths
+        model (object): "torch.nn.Sequential"-Object defining most of the neural network
+        criterion (object): "torch.nn.MSELoss"-Object defining the cost-function of the neural network
+        optimizer (obejct): "torch.optim.Adam"-Object required for some gradients
+
+
+    """
 
     def __init__(self, rollouts):
         self.rollouts = rollouts
@@ -62,6 +82,7 @@ class QCritic:
         while (loss > loss_threshold) & (epoch < MAX_EPOCHS):
             prediction_batches = ()
             target_batches = ()
+            average_prediction = 0.0
             for i in range(0, np.shape(self.rollouts)[0]):
                 # Forward Propagation
                 predictions = self.model(model_input_batches[i])
@@ -77,7 +98,7 @@ class QCritic:
                     else:
                         targets[0:targets.size()[0] - td_step] += np.power(DECAY, td_step) * rewards[td_step:]
                 target_batches += (targets,)
-
+                average_prediction += torch.sum(predictions) / self.rollouts[0].length
 
             # Compute and print loss
             loss = 0.0

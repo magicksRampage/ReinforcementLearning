@@ -10,14 +10,17 @@ import quanser_robots
 
 MAX_EPISODE_LENGTH = 200
 NUMBER_OF_BATCHES = 5
-NUMBER_OF_EPISODES = 50
+NUMBER_OF_EPISODES = 20
 
 
 class Agent:
     """
-    The upper-most abstraction of reinforcement-learning process.
+    The upper-most abstraction of the reinforcement-learning process.
     Handles all transitional information between different steps for calculating a new policy
     and between policies
+
+    Args:
+        environment_name: The String defining the gym.environment the agent will act in
 
     Attributes:
         env (object): the object returned from gym.make()
@@ -30,13 +33,6 @@ class Agent:
     """
 
     def __init__(self, environment_name):
-        """
-        Initialize the Agent
-
-        :param environment_name: The String defining the gym.environment the agent will act in
-
-        :return: None
-        """
         self.env = gym.make(environment_name)
         self.state_dimensions = np.reshape(np.append(self.env.observation_space.low, self.env.observation_space.high), (2, -1)).transpose()
         self.action_dimension = [self.env.action_space.low[0], self.env.action_space.high[0]]

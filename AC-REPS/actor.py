@@ -27,7 +27,7 @@ class Actor:
         self.old_actor = old_actor
         self.regulated_weights = None
         self._calculate_weights()
-        self.model = model.Model(model.POLYNOMIAL_LINEAR,
+        self.model = model.Model(model.POLYNOMIAL_QUADRATIC,
                                  np.shape(self.rollouts[0].states[0])[0])
         self.std_deviation = 1.
         self.progress = progress
@@ -55,14 +55,14 @@ class Actor:
     def _fit(self):
         print("Handing of work to scipy")
         prev_time = time.clock()
-        initial_values = np.append(self.model.parameters, [self.std_deviation])
+        initial_values = np.append(self.model.parameters, self.std_deviation)
 
         constraints = ()
         for i in range(0, initial_values.size):
             if i == initial_values.size-1:
-                constraints += ((0, 1 - self.progress),)
+                constraints += ((0, 1*(1-self.progress)),)
             else:
-                constraints += ((-1, 1),)
+                constraints += ((-0.5, 0.5),)
 
         res = minimize(self._wrap_inputs,
                        initial_values,
@@ -139,7 +139,7 @@ class Actor:
         return (1/2) * (1 + erf((value - mean) / (2 * std_deviation**2)))
 
     def _gaussian_quantile(self, mean, std_deviation, x):
-        return mean + std_deviation*np.sqrt(2)*erfinv(2*x - 1)
+        return norm(loc=mean, scale=std_deviation).ppf(x)
 
     def act(self, state):
         mean = self.model.evaluate(state)
@@ -147,7 +147,7 @@ class Actor:
         redraws = 0
         while (sample < -1) | (1 < sample):
             redraws += 1
-            print(sample)
+            # print(sample)
             sample = self._pseudo_gaussian_quantile(mean, self.std_deviation, np.random.random())
         # print("Drew ", redraws, " new samples")
         return np.clip(sample, -1, 1)

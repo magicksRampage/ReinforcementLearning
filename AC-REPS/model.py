@@ -75,7 +75,7 @@ class Model:
                     for j in range(0, self.len_in):
                         self.inner_parameters[i * self.len_in + j] = np.random.random() * 2 - 1
         # Let every basis function influence the outcome at first
-        self.parameters = np.ones((self.number_of_parameters, 1))
+        self.parameters = np.ones((self.number_of_parameters, 1)) * 0.1
 
     def evaluate(self, args):
         evaluated_basis_functions = np.zeros(np.shape(self.parameters))

@@ -16,7 +16,7 @@ class VCritic:
         self.rollouts = rollouts
         self.q_critic = q_critic
         self.eta = INITIAL_ETA
-        self.model = model.Model(model.POLYNOMIAL_LINEAR,
+        self.model = model.Model(model.POLYNOMIAL_QUADRATIC,
                                  np.shape(self.rollouts[0].states[0])[0])
         self._minimize_dual()
 
