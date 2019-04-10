@@ -72,36 +72,16 @@ class VCritic:
             exp_sum = 0.0
             average_state = np.zeros(np.shape(states[0]))
             running_max_value = -np.inf
-            # ---Profiling---
-            start_rollout_time = time.clock()
-            regulator_time = 0.0
-            estimating_time = 0.0
-            prev_time = time.clock()
-            # ---
+            exponents = np.zeros((number_of_samples, 1))
             for j in range(0, number_of_samples):
-                exponent = ((self.q_critic.estimate_q(states[j], actions[j]) - self.estimate_v(states[j])) / eta)
-                if exponent > running_max_value:
-                    running_max_value = exponent
-            exp_regulator = running_max_value + np.log(number_of_samples)
-            # ---Profiling---
-            regulator_time += time.clock()-prev_time
-            prev_time = time.clock()
-            # ---
-            for j in range(0, number_of_samples):
+                exponents[j] = ((self.q_critic.estimate_q(states[j], actions[j]) - self.estimate_v(states[j])) / eta)
                 average_state += (1 / number_of_samples) * states[j]
+            exp_regulator = np.max(exponents)
+            regulated_exponents = np.exp(exponents - exp_regulator)
 
-                exp_sum += np.exp(((self.q_critic.estimate_q(states[j], actions[j]) - self.estimate_v(states[j])) / eta)
-                                  - exp_regulator)
-            # ---Profiling---
-            estimating_time += time.clock() - prev_time
-            # ---
             dual += EPSILON * eta
             dual += self.estimate_v(average_state)
-            dual += eta * (np.log(exp_sum) - np.log(number_of_samples) + exp_regulator)
-
-            # print("Relative time to calculate the regulator: ", np.round(regulator_time / (time.clock() - start_rollout_time), 2))
-            # print("Relative time to let the Critics estimate: ", np.round(estimating_time / (time.clock() - start_rollout_time), 2))
-            # print("---")
+            dual += eta * (np.log(np.sum(regulated_exponents)) - np.log(number_of_samples) + exp_regulator)
 
         # print(".")
         # print(parameters, eta)
