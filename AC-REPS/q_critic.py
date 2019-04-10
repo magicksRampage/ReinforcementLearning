@@ -6,9 +6,9 @@ import torch.nn as nn
 import torch.optim as optim
 
 # TODO: Hyper-parameter: Decay-rate for the rewards and Qs
-DECAY = 0.98
+DECAY = 0.99
 # TODO: Computability: max_epoches
-MAX_EPOCHS = 1000
+MAX_EPOCHS = 2000
 
 
 class QCritic:
@@ -58,7 +58,7 @@ class QCritic:
         loss = np.inf
         epoch = 0
         # TODO: Hyper-parameter: loss_threshold
-        loss_threshold = 1e-6
+        loss_threshold = 1e-8
         while (loss > loss_threshold) & (epoch < MAX_EPOCHS):
             prediction_batches = ()
             target_batches = ()

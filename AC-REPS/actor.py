@@ -4,6 +4,7 @@ import time
 from scipy.optimize import minimize
 from scipy.stats import norm
 from scipy.special import erf
+from scipy.special import erfinv
 
 
 class Actor:
@@ -61,7 +62,7 @@ class Actor:
             if i == initial_values.size-1:
                 constraints += ((0, 1 - self.progress),)
             else:
-                constraints += ((None, None),)
+                constraints += ((-1, 1),)
 
         res = minimize(self._wrap_inputs,
                        initial_values,
@@ -120,24 +121,33 @@ class Actor:
         if std_deviation == 0.0:
             return float(np.abs(mean-value) < 1e-6)
         pdf = (np.exp(-(value - mean)**2 / (2 * std_deviation ** 2)) / np.sqrt(2 * np.pi * std_deviation ** 2))
-        cdf_inside_range = self._gaussian_cdf(mean, std_deviation, 1) - self._gaussian_cdf(mean, std_deviation, -1)
-        if cdf_inside_range < 1e-10:
+        cdf_over_range = self._gaussian_cdf(mean, std_deviation, 1) - self._gaussian_cdf(mean, std_deviation, -1)
+        if cdf_over_range < 1e-10:
             return 1.0
-        result = pdf / cdf_inside_range
+        result = pdf / cdf_over_range
         # print(result, "|", pdf, "|", cdf_inside_range)
         # print(cdf_inside_range)
         return result
 
+    def _pseudo_gaussian_quantile(self, mean, std_deviation, x):
+        lower_cdf = self._gaussian_cdf(mean, std_deviation, -1)
+        upper_cdf = self._gaussian_cdf(mean, std_deviation, 1)
+        regulated_sample = x*(upper_cdf - lower_cdf) + lower_cdf
+        return self._gaussian_quantile(mean, std_deviation, regulated_sample)
+
     def _gaussian_cdf(self, mean, std_deviation, value):
         return (1/2) * (1 + erf((value - mean) / (2 * std_deviation**2)))
 
+    def _gaussian_quantile(self, mean, std_deviation, x):
+        return mean + std_deviation*np.sqrt(2)*erfinv(2*x - 1)
+
     def act(self, state):
         mean = self.model.evaluate(state)
-        # print(mean, self.std_deviation)
-        sample = norm.rvs(loc=mean, scale=np.abs(self.std_deviation))
+        sample = self._pseudo_gaussian_quantile(mean, self.std_deviation, np.random.random())
         redraws = 0
-        while (sample < 0) | (1 < sample):
+        while (sample < -1) | (1 < sample):
             redraws += 1
-            sample = norm.rvs(loc=mean, scale=np.abs(self.std_deviation))
+            print(sample)
+            sample = self._pseudo_gaussian_quantile(mean, self.std_deviation, np.random.random())
         # print("Drew ", redraws, " new samples")
         return np.clip(sample, -1, 1)

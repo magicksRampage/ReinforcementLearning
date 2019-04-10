@@ -167,7 +167,7 @@ class Agent:
         while (not done) & (steps < MAX_EPISODE_LENGTH):
             if self.actor is None:
                 # If you haven't trained an actor explore randomly
-                action = self._denormalize(np.clip(np.random.normal(0.5, np.sqrt(2)), 0, 1),
+                action = self._denormalize(np.clip(np.random.normal(0, 1), -1, 1),
                                            self.action_dimension[0],
                                            self.action_dimension[1])
             else:
