@@ -12,12 +12,12 @@ INITIAL_PARAMETER_SCALE = 0.0
 
 class VCritic:
 
-    def __init__(self, samples, q_critic):
-        self.samples = samples
+    def __init__(self, rollouts, q_critic):
+        self.rollouts = rollouts
         self.q_critic = q_critic
         self.eta = INITIAL_ETA
         self.model = model.Model(model.POLYNOMIAL_LINEAR,
-                                 np.shape(self.samples[0][0])[0])
+                                 np.shape(self.rollouts[0].states[0])[0])
         self._minimize_dual()
 
     def _minimize_dual(self):
@@ -36,45 +36,56 @@ class VCritic:
                        initial_values,
                        method='SLSQP',
                        bounds=constraints,
-                       options={'disp': True})
+                       options={'disp': False})
         self.model.parameters = res.x[0:res.x.size-1]
         self.eta = res.x[-1]
         print(res)
-        print("Fitting V_Critic_Time: ", time.clock() - prev_time)
+        number_of_samples = self.rollouts[0].length
+        average_v = 0.0
+        for i in range(0, number_of_samples):
+            average_v = (1/number_of_samples) * self.estimate_v(self.rollouts[0].states[i])
+
+        print("Average V: ", average_v)
 
     def _wrap_inputs(self, arg):
         return self.evaluate_dual(arg[-1], arg[0:arg.size-1])
 
     def evaluate_dual(self, eta=None, parameters=None):
+        prev_time = time.clock()
         if eta is None:
             eta = self.eta
         if eta == 0:
             return np.inf
         if parameters is not None:
             self.model.parameters = parameters
-        number_of_samples = np.shape(self.samples[0])[0]
-        states = self.samples[0]
-        actions = self.samples[1]
-        exp_sum = 0.0
-        average_state = np.zeros(np.shape(states[0]))
-        exp_regulator = 0.0
-        running_max_value = -np.inf
-        for i in range(0, number_of_samples):
-            exponent = ((self.q_critic.estimate_q(states[i], actions[i]) - self.estimate_v(states[i])) / eta)
-            if exponent > running_max_value:
-                running_max_value = exponent
-        exp_regulator = running_max_value + np.log(number_of_samples)
-        for i in range(0, number_of_samples):
-            average_state += (1 / number_of_samples) * states[i]
 
-            exp_sum += np.exp(((self.q_critic.estimate_q(states[i], actions[i]) - self.estimate_v(states[i])) / eta)
-                              - exp_regulator)
+        # ---Profiling---
+        start_time = time.clock()
+        regulator_time = 0.0
+        estimating_time = 0.0
+        # ---
         dual = 0.0
-        dual += EPSILON*eta
-        dual += self.estimate_v(average_state)
-        dual += eta * (np.log(exp_sum) - np.log(number_of_samples) + exp_regulator)
+        for i in range(0, np.size(self.rollouts)):
+            number_of_samples = self.rollouts[i].length
+            states = self.rollouts[i].states
+            actions = self.rollouts[i].actions
+            exp_sum = 0.0
+            average_state = np.zeros(np.shape(states[0]))
+            running_max_value = -np.inf
+            exponents = np.zeros((number_of_samples, 1))
+            for j in range(0, number_of_samples):
+                exponents[j] = ((self.q_critic.estimate_q(states[j], actions[j]) - self.estimate_v(states[j])) / eta)
+                average_state += (1 / number_of_samples) * states[j]
+            exp_regulator = np.max(exponents)
+            regulated_exponents = np.exp(exponents - exp_regulator)
+
+            dual += EPSILON * eta
+            dual += self.estimate_v(average_state)
+            dual += eta * (np.log(np.sum(regulated_exponents)) - np.log(number_of_samples) + exp_regulator)
+
         # print(".")
         # print(parameters, eta)
+        # print("Time used to calculate the dual: ", time.clock()-start_time)
         return dual
 
     def estimate_v(self, state):
