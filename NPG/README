@@ -1,0 +1,6 @@
+Natural Policy Gradients
+
+1. install python 3.5+
+2. install OpenAI Gym
+3. install Quanser Robots
+4. run gradasc.py
