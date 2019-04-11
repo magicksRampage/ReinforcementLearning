@@ -11,8 +11,27 @@ INITIAL_PARAMETER_SCALE = 0.0
 
 
 class VCritic:
+    """
+    The abstraction of the V-state-value-function
+    This function is approximated by a linear model of choice
+
+    Attributes:
+        rollouts (object): "rollout.Rollout"-Object containing the episodes of samples
+        q_critic (object): "q_critic.Q_critic"-object defining the approximation for the Q-function
+        eta (float): scalar lagrangian multiplier
+        model (object): "model.Model"-Object defining how the observations translate into an action
+
+    """
 
     def __init__(self, rollouts, q_critic):
+        """
+        :param rollout (object): The observations of the last roll-out containing (states, actions, following_states, rewards)
+        :param q_critic (object): The object estimating the Q-Function
+
+        Calls:
+            model.Model
+            _minimize_dual
+        """
         self.rollouts = rollouts
         self.q_critic = q_critic
         self.eta = INITIAL_ETA
@@ -21,6 +40,20 @@ class VCritic:
         self._minimize_dual()
 
     def _minimize_dual(self):
+        """
+        Minimize the lagrangian dual through the model parameters
+
+        Updates:
+            model.parameters (through _wrap_inputs)
+            eta (through _wrap_inputs)
+
+        Calls:
+            scipy.optimize.minimize
+            _wrap_inputs
+            estimate_v
+
+        :return: None
+        """
         print("Minimizing Dual")
         initial_values = np.append(self.model.parameters, self.eta)
         constraints = ()
@@ -37,8 +70,6 @@ class VCritic:
                        method='SLSQP',
                        bounds=constraints,
                        options={'disp': False})
-        self.model.parameters = res.x[0:res.x.size-1]
-        self.eta = res.x[-1]
         print(res)
         number_of_samples = self.rollouts[0].length
         average_v = 0.0
@@ -47,17 +78,35 @@ class VCritic:
 
         print("Average V: ", average_v)
 
-    def _wrap_inputs(self, arg):
-        return self.evaluate_dual(arg[-1], arg[0:arg.size-1])
+    def _wrap_inputs(self, values):
+        """
+        Wraps inputs from the form scipy.optimize.minimize uses to the form of the programm
 
-    def evaluate_dual(self, eta=None, parameters=None):
+
+        :param values(n+1 x 1): the vector of values scipy optimizes
+                                                  (last entry contains eta)
+
+        :return: the evaluation of the dual
+        """
+        self.model.parameters = values[0:-1]
+        self.eta = values[-1]
+        return self.evaluate_dual(values[-1], values[0:values.size - 1])
+
+    def evaluate_dual(self):
+        """
+        Evaluate the lagrangian dual.
+        Due to numerical issues an regulator for the exp_sum is used
+
+        Calls:
+            q_critic.estimate_q
+            v_critic.estimate_v
+
+        :return: the dual value
+        """
         prev_time = time.clock()
-        if eta is None:
-            eta = self.eta
+        eta = self.eta
         if eta == 0:
             return np.inf
-        if parameters is not None:
-            self.model.parameters = parameters
 
         # ---Profiling---
         start_time = time.clock()
@@ -89,6 +138,16 @@ class VCritic:
         return dual
 
     def estimate_v(self, state):
+        """
+        Evaluate the model for a state
+
+        :param state (n x 1): the state for which v is to be estimated
+
+        Calls:
+            model.evaluate
+
+        :return: Estimation of the value function
+        """
         res = self.model.evaluate(state)
         return res
 

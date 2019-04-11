@@ -10,29 +10,31 @@ import quanser_robots
 
 MAX_EPISODE_LENGTH = 200
 NUMBER_OF_BATCHES = 5
-NUMBER_OF_EPISODES = 100
-
+NUMBER_OF_EPISODES = 50
 
 class Agent:
     """
-    The upper-most abstraction of the reinforcement-learning process.
+    The upper-most abstraction layer of the reinforcement-learning process.
     Handles all transitional information between different steps for calculating a new policy
     and between policies
 
-    Args:
-        environment_name: The String defining the gym.environment the agent will act in
-
     Attributes:
         env (object): the object returned from gym.make()
-        state_dimensions (len(state) x 2): matrix containing the bounds on the observation dimensions
-        action_dimensions (len(action) x 2): matrix containing the bounds on the action dimensions
-        rollouts (NUMBER_OF_BATCHES x object): tuple containing "rollout.Rollout"-objects whom specify the rollouts
+        state_dimensions (n x 2): matrix containing the bounds on the observation dimensions
+        action_dimensions (m x 2): matrix containing the bounds on the action dimensions
+        rollouts (l x object): tuple containing "rollout.Rollout"-objects whom specify the rollouts
         q_critic (object): "q_critic.Q_critic"-object defining the approximation for the Q-function
         v_critiv (object): "v_critic.V_critic"-object defining the approximation for the V-function
         actor (object): "actor.Actor"-object defining the gaussian policy
     """
 
     def __init__(self, environment_name):
+        """
+        :param environment_name (String): The String defining the gym.environment the agent will act in
+
+        Calls:
+            gym.make
+        """
         self.env = gym.make(environment_name)
         self.state_dimensions = np.reshape(np.append(self.env.observation_space.low, self.env.observation_space.high), (2, -1)).transpose()
         self.action_dimension = [self.env.action_space.low[0], self.env.action_space.high[0]]
@@ -162,7 +164,7 @@ class Agent:
         steps = 0
         while (not done) & (steps < MAX_EPISODE_LENGTH):
             if self.actor is None:
-                # If you haven't trained an actor explore randomly
+                # If you haven't trained an actor explore with a set gaussian == N(0,1)
                 action = self._denormalize(np.clip(np.random.normal(0, 1), -1, 1),
                                            self.action_dimension[0],
                                            self.action_dimension[1])
@@ -200,9 +202,9 @@ class Agent:
         """
         Scales a value into the interval [-1,1]
 
-        :param: value: The value to be scaled
-        :param: min_value: The lower bound of the interval the value originated from
-        :param: max_value: The upper bound of the interval the value originated from
+        :param: value (double): The value to be scaled
+        :param: min_value (double): The lower bound of the interval the value originated from
+        :param: max_value (double): The upper bound of the interval the value originated from
 
         :return: The normalized Value
         """
@@ -212,9 +214,9 @@ class Agent:
         """
         Scales a up from the interval [-1,1]
 
-        :param: value: The value to be scaled
-        :param: min_value: The lower bound of the interval the value will be scaled to
-        :param: max_value: bound of the interval the value will be scaled to
+        :param: value (double): The value to be scaled
+        :param: min_value (double): The lower bound of the interval the value will be scaled to
+        :param: max_value (double): bound of the interval the value will be scaled to
 
         :return: The denormalized Value
         """

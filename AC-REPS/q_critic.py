@@ -17,9 +17,6 @@ class QCritic:
     This function is approximated by neural network with 2 hidden layers with a width of 20
     Each layer combines a linear layer and a rectifier-activation function
 
-    Args:
-        rollouts (object): "rollout.Rollout"-Object containing the episodes of samples
-
     Attributes:
         rollouts (object): "rollout.Rollout"-Object containing the episodes of samples
         n_in (int): Size of a state-action-pair to be put into the NN
@@ -34,6 +31,17 @@ class QCritic:
     """
 
     def __init__(self, rollouts):
+        """
+        :param rollouts (object): "rollout.Rollout"-Object containing the episodes of samples
+
+        Calls:
+            nn.Sequential
+            nn.Linear
+            nn.ReLU
+            nn.MSELoss
+            optim.Adam
+            _fit
+        """
         self.rollouts = rollouts
         # Size of a state-action pair
         self.n_in = np.size(rollouts[0].states[0]) + np.size(rollouts[0].actions[0])
@@ -58,6 +66,24 @@ class QCritic:
         self._fit()
 
     def _fit(self):
+        """
+        Fit the neural network to the Q-Function of the data. This function relies mainly on pytorch and thus any
+        data used inside should be stored in pytorch-data-structures.
+        The code supports different TD-sampling-targets but at the moment 1-TD-sampling is used.
+
+        Updates:
+            self.optimizer
+
+        Calls:
+            optimizer.zero_grad
+                (optim.Adam.zero_grad)
+            loss.backward
+                (???)
+            optimizer.step
+                (optim.Adam.step)
+
+        :return: None
+        """
         print("Starting to fit NN")
         model_input_batches = ()
         reward_batches = ()
@@ -70,7 +96,7 @@ class QCritic:
             model_input[:, 0:np.shape(states)[1]] = states
             model_input[:, np.shape(states)[1]:] = actions
             model_input = torch.from_numpy(model_input)
-            # Switch to float because the NN demands it ?.?
+            # Switch to float because the NN demands it
             model_input_batches += (model_input.float(),)
             reward_batches += (rewards.float(),)
 
@@ -124,6 +150,17 @@ class QCritic:
         # print(number_of_predictions)
 
     def estimate_q(self, state, action):
+        """
+        Evaluate the neural network for a state-action-pair
+
+        :param state (n x 1): state of the state-action-pair
+        :param action (m x 1): action of the state-action-pair
+
+        Calls:
+            model
+
+        :return: estimation of q for the given state-action-pair
+        """
         input = torch.from_numpy(np.reshape(np.append(state, action), (1, -1)))
         input = input.float()
         result = self.model(input)
